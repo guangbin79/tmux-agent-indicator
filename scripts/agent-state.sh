@@ -440,9 +440,7 @@ case "$state" in
             restore_active_border_style "$window_id"
         fi
 
-        if [ "$window_id" != "$active_window_id" ]; then
-            apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg"
-        fi
+        apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg"
         start_animation
         notify_state_change "$agent" "$state" "$pane_id"
         ;;
@@ -519,6 +517,8 @@ case "$state" in
 
         if [ "$window_id" != "$active_window_id" ]; then
             apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg" "done"
+        else
+            clear_window_title_style "$window_id"
         fi
         notify_state_change "$agent" "$state" "$pane_id"
 
