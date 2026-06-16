@@ -329,6 +329,7 @@ notify_state_change() {
     if [ -n "$ext_cmd" ]; then
         AGENT_NAME="$agent" AGENT_STATE="$state" \
         AGENT_SESSION="$session_name" AGENT_WINDOW="$window_name" \
+        AGENT_PANE="$pane_id" \
         bash -c "$ext_cmd" 2>/dev/null &
     fi
 }

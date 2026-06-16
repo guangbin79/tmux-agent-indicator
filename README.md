@@ -311,7 +311,7 @@ set -g @agent-indicator-notification-duration '3000'
 
 Available format placeholders: `#{agent_name}`, `#{agent_state}`, `#{session_name}`, `#{window_name}`, `#{window_index}`.
 
-You can also run an external command on each notification. The command receives environment variables `AGENT_NAME`, `AGENT_STATE`, `AGENT_SESSION`, and `AGENT_WINDOW`:
+You can also run an external command on each notification. The command receives environment variables `AGENT_NAME`, `AGENT_STATE`, `AGENT_SESSION`, `AGENT_WINDOW`, and `AGENT_PANE` (the target pane id, available for custom commands):
 
 ```tmux
 # Log notifications to a file
