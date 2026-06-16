@@ -321,6 +321,21 @@ set -g @agent-indicator-notification-command 'echo "$AGENT_NAME $AGENT_STATE" >>
 set -g @agent-indicator-notification-command 'osascript -e "display notification \"$AGENT_NAME is $AGENT_STATE\" with title \"tmux agent\""'
 ```
 
+### Email notifications (session-complete)
+
+A bundled `scripts/notify-email.sh` emails you when a **session becomes fully done**: every tracked agent in the session is `done` and stays that way for a stability window (default 60s). Only the most recent completion sends, so concurrent or back-to-back completions in the same session produce a single email. If the session is no longer fully done at the end of the window (an agent started running again, needs input, etc.), the email is cancelled.
+
+Completion is based on hook-tracked state, so a persistent agent CLI (e.g. an idle opencode or codex process that stays running) does not block the email — once the agent reports `done` via its hook, it counts as done. Make sure each agent's hook integration is installed (the installer wires up Claude/Codex/OpenCode) so its state is tracked.
+
+```tmux
+set -g @agent-indicator-notification-command 'bash ~/.tmux/plugins/tmux-agent-indicator/scripts/notify-email.sh'
+set -g @agent-indicator-email-to 'you@example.com'      # required
+set -g @agent-indicator-email-delay '60'                # optional, stability window in seconds
+set -g @agent-indicator-email-command ''                # optional, custom sender (body on stdin; falls back to `mail` / `sendmail`)
+```
+
+If any agent in the session transitions (e.g. starts running again, requests input) during the window, the email is cancelled. Subject/body are session-oriented (e.g. `Session <name> complete: all agents done at ...`).
+
 ## Custom Agent Integration
 
 To integrate any agent that does not have built-in hook support, call `agent-state.sh` from your agent's hooks or wrapper script.
