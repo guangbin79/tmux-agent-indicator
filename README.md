@@ -321,20 +321,25 @@ set -g @agent-indicator-notification-command 'echo "$AGENT_NAME $AGENT_STATE" >>
 set -g @agent-indicator-notification-command 'osascript -e "display notification \"$AGENT_NAME is $AGENT_STATE\" with title \"tmux agent\""'
 ```
 
-### Email notifications (session-complete)
+### Email notifications
 
-A bundled `scripts/notify-email.sh` emails you when a **session becomes fully done**: every tracked agent in the session is `done` and stays that way for a stability window (default 60s). Only the most recent completion sends, so concurrent or back-to-back completions in the same session produce a single email. If the session is no longer fully done at the end of the window (an agent started running again, needs input, etc.), the email is cancelled.
+A bundled `scripts/notify-email.sh` emails you on two events:
+
+- **Session complete** (`done`): fires when a session becomes fully done — every tracked agent in the session is `done` and stays that way for a stability window (default 60s). Only the most recent completion sends, so concurrent or back-to-back completions in the same session produce a single email. If the session is no longer fully done at the end of the window (an agent started running again, requests input, etc.), the email is cancelled.
+- **Needs input** (`needs-input`): fires immediately the moment any agent enters `needs-input`, so you can act on it without watching the terminal. It is throttled per session (default 30s), so a flurry of input requests produces one email per window. A needs-input email also invalidates any in-flight session-complete email for that session, so the two never overlap confusingly.
 
 Completion is based on hook-tracked state, so a persistent agent CLI (e.g. an idle opencode or codex process that stays running) does not block the email — once the agent reports `done` via its hook, it counts as done. Make sure each agent's hook integration is installed (the installer wires up Claude/Codex/OpenCode) so its state is tracked.
 
 ```tmux
 set -g @agent-indicator-notification-command 'bash ~/.tmux/plugins/tmux-agent-indicator/scripts/notify-email.sh'
-set -g @agent-indicator-email-to 'you@example.com'      # required
-set -g @agent-indicator-email-delay '60'                # optional, stability window in seconds
-set -g @agent-indicator-email-command ''                # optional, custom sender (body on stdin; falls back to `mail` / `sendmail`)
+set -g @agent-indicator-email-to 'you@example.com'                       # required
+set -g @agent-indicator-email-delay '60'                                 # optional, session-complete stability window in seconds
+set -g @agent-indicator-email-command ''                                 # optional, custom sender (body on stdin; falls back to `mail` / `sendmail`)
+set -g @agent-indicator-email-needs-input-enabled 'on'                   # optional, enable needs-input emails (default: on)
+set -g @agent-indicator-email-needs-input-throttle '30'                  # optional, needs-input throttle window in seconds (default: 30)
 ```
 
-If any agent in the session transitions (e.g. starts running again, requests input) during the window, the email is cancelled. Subject/body are session-oriented (e.g. `Session <name> complete: all agents done at ...`).
+Subject prefixes distinguish the two: session-complete emails start with `[oc-done]`, needs-input emails with `[oc-need_input]`. Subjects and bodies are session-oriented, e.g. `[oc-done] <session title>` / `Session <name> complete: all agents done at ...` and `[oc-need_input] <session title>` / `Session <name>: agent <name> needs input at ...`.
 
 ## Custom Agent Integration
 
