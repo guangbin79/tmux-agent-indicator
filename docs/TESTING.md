@@ -199,12 +199,15 @@ Verifies the email body includes the OpenCode agent's last assistant message for
    - **Subject:** starts with `[oc-done]`
    - **Body:** equals the agent's last text response (the message that completed the task), truncated to 2000 chars by default.
 
-### Scenario 2: `needs-input` email with assistant message
+### Scenario 2: `needs-input` email behavior
 
 1. In an OpenCode session, trigger a permission ask (e.g., agent requests tool approval).
 2. Verify the received email:
    - **Subject:** starts with `[oc-need_input]`
-   - **Body:** equals the agent's question text from just before the permission request.
+   - **Body:** depends on whether the plugin has resolved a prior `session.idle`/`session.error` in the same session:
+     - **First-turn permission ask** (no prior idle): body falls back to the standard one-line summary (`Session <name>: agent opencode needs input at <timestamp>`).
+     - **Subsequent turns**: body shows the assistant message captured at the most recent `session.idle`/`session.error` — i.e. the agent's final response from the *previous* turn, not the question text from the current permission ask.
+   - This is a known design trade-off: `needs-input` events don't carry enough context to fetch a fresh "current question" message, so the plugin reuses the last resolved value. The fallback path guarantees the email is still sent with usable context.
 
 ### Scenario 3: Fallback for non-OpenCode agents
 

@@ -21,6 +21,12 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
     }
   };
 
+  // Hard cap on the message length forwarded through the shell command line,
+  // to stay well below the kernel's ARG_MAX ceiling (~2MB on Linux). The
+  // user-configured @agent-indicator-email-body-limit (default 2000) applies
+  // downstream in notify-email.sh; this is a separate safety net.
+  const PLUGIN_MESSAGE_CAP = 100000;
+
   const resolveLastAssistantMessage = async (sessionID) => {
     try {
       const res = await client.session.messages({
@@ -28,14 +34,20 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
         query: { limit: 20 },
       });
       const messages = Array.isArray(res?.data) ? res.data : [];
+      // Skip assistant messages that have no usable text part (e.g. tool-call-only turns).
       const lastAssistant = [...messages]
         .reverse()
-        .find((m) => m?.info?.role === "assistant");
-      lastAssistantMessage = (lastAssistant?.parts || [])
+        .find((m) => m?.info?.role === "assistant"
+          && Array.isArray(m?.parts)
+          && m.parts.some((p) => p?.type === "text" && typeof p.text === "string" && p.text.trim() !== ""));
+      const text = (lastAssistant?.parts || [])
         .filter((p) => p?.type === "text" && typeof p.text === "string")
         .map((p) => p.text)
         .join("\n")
         .trim();
+      lastAssistantMessage = text.length > PLUGIN_MESSAGE_CAP
+        ? `${text.slice(0, PLUGIN_MESSAGE_CAP)}...(truncated)`
+        : text;
     } catch {
       lastAssistantMessage = "";
     }
