@@ -14,9 +14,21 @@ tests=(
     "$ROOT_DIR/tests/test-notification-env-forwarding.sh"
 )
 
+failed_tests=()
+
 for test_script in "${tests[@]}"; do
     echo "==> $(basename "$test_script")"
-    "$test_script"
+    if ! "$test_script"; then
+        failed_tests+=("$(basename "$test_script")")
+    fi
 done
+
+if [ "${#failed_tests[@]}" -gt 0 ]; then
+    echo "FAIL: ${#failed_tests[@]} test(s) failed:" >&2
+    for name in "${failed_tests[@]}"; do
+        echo "  - $name" >&2
+    done
+    exit 1
+fi
 
 echo "PASS: all automated tests"

@@ -24,8 +24,10 @@ Run individual checks:
 ./tests/test-state-transitions.sh
 ./tests/test-indicator-output.sh
 ./tests/test-focus-reset-done.sh
+./tests/test-email-body.sh
 ./tests/test-window-title-reset.sh
 ./tests/test-running-animation.sh
+./tests/test-notification-env-forwarding.sh
 ```
 
 Manual tmux-socket commands (below) are still useful for debugging.
@@ -172,3 +174,54 @@ Optional screenshot capture:
 ```bash
 screencapture -x /tmp/tmux-agent-indicator-check.png
 ```
+
+## Email Notification Manual Test
+
+Verifies the email body includes the OpenCode agent's last assistant message for `done` and `needs-input` events. Requires a working email sender (`mail` or `sendmail`) OR a custom `@agent-indicator-email-command` to capture the body.
+
+### Setup
+
+1. Install the OpenCode plugin: `cp plugins/opencode-tmux-agent-indicator.js ~/.config/opencode/plugins/`
+2. Configure email in `~/.tmux.conf`:
+   ```tmux
+   set -g @agent-indicator-notification-command 'bash ~/.tmux/plugins/tmux-agent-indicator/scripts/notify-email.sh'
+   set -g @agent-indicator-email-to 'you@example.com'
+   set -g @agent-indicator-email-delay '0'
+   set -g @agent-indicator-email-needs-input-throttle '0'
+   ```
+3. Reload tmux config: `tmux source-file ~/.tmux.conf`
+
+### Scenario 1: `done` email with assistant message
+
+1. In an OpenCode session, ask the agent to perform a task that produces a final response.
+2. Wait for `session.idle` (agent finishes).
+3. Verify the received email:
+   - **Subject:** starts with `[oc-done]`
+   - **Body:** equals the agent's last text response (the message that completed the task), truncated to 2000 chars by default.
+
+### Scenario 2: `needs-input` email with assistant message
+
+1. In an OpenCode session, trigger a permission ask (e.g., agent requests tool approval).
+2. Verify the received email:
+   - **Subject:** starts with `[oc-need_input]`
+   - **Body:** equals the agent's question text from just before the permission request.
+
+### Scenario 3: Fallback for non-OpenCode agents
+
+1. Trigger a Claude or Codex agent's `Stop` / `done` hook (e.g., end a Claude session).
+2. Verify the received email body is the standard one-line summary:
+   - `Session <name> complete: all agents done at <timestamp>`
+   (No `OPENCODE_LAST_MESSAGE` env var is set for non-OpenCode agents, so the fallback is used.)
+
+### Scenario 4: Truncation at custom limit
+
+1. Set a small limit: `tmux set -g @agent-indicator-email-body-limit '100'`
+2. Trigger a `done` event with a long assistant message (>100 chars).
+3. Verify the email body is truncated to 100 chars with `...(truncated)` suffix.
+4. Reset: `tmux set -gu '@agent-indicator-email-body-limit'`
+
+### Scenario 5: API failure fallback
+
+1. Block the OpenCode API (e.g., kill the OpenCode server mid-session, or break networking).
+2. Trigger a state transition that would normally fetch the last assistant message.
+3. Verify the email body falls back to the one-line summary (no email is lost).
