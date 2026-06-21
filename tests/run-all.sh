@@ -10,6 +10,7 @@ tests=(
     "$ROOT_DIR/tests/test-focus-reset-done.sh"
     "$ROOT_DIR/tests/test-window-title-reset.sh"
     "$ROOT_DIR/tests/test-running-animation.sh"
+    "$ROOT_DIR/tests/test-notification-env-forwarding.sh"
 )
 
 for test_script in "${tests[@]}"; do
