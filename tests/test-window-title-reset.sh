@@ -9,7 +9,9 @@ trap cleanup_test_server EXIT
 
 setup_test_server "window-title-reset"
 create_other_window
-tmux_cmd select-window -t ai:main
+# Source window must be non-active when state is triggered, otherwise
+# apply_window_title_style is intentionally skipped (active window gets no hint).
+tmux_cmd select-window -t ai:other
 
 run_state needs-input
 before_style="$(get_window_option "$WIN" "window-status-style")"
