@@ -330,6 +330,8 @@ A bundled `scripts/notify-email.sh` emails you on two events:
 
 Completion is based on hook-tracked state, so a persistent agent CLI (e.g. an idle opencode or codex process that stays running) does not block the email — once the agent reports `done` via its hook, it counts as done. Make sure each agent's hook integration is installed (the installer wires up Claude/Codex/OpenCode) so its state is tracked.
 
+The email body includes the OpenCode agent's last assistant message when available (for `done` and `needs-input` events). For other agents (Claude, Codex), or if the message cannot be retrieved, the body falls back to the standard one-line summary. Configure truncation via `@agent-indicator-email-body-limit` (default 2000 characters).
+
 ```tmux
 set -g @agent-indicator-notification-command 'bash ~/.tmux/plugins/tmux-agent-indicator/scripts/notify-email.sh'
 set -g @agent-indicator-email-to 'you@example.com'                       # required
@@ -337,6 +339,7 @@ set -g @agent-indicator-email-delay '60'                                 # optio
 set -g @agent-indicator-email-command ''                                 # optional, custom sender (body on stdin; falls back to `mail` / `sendmail`)
 set -g @agent-indicator-email-needs-input-enabled 'on'                   # optional, enable needs-input emails (default: on)
 set -g @agent-indicator-email-needs-input-throttle '30'                  # optional, needs-input throttle window in seconds (default: 30)
+set -g @agent-indicator-email-body-limit '2000'                          # optional, max chars of OpenCode last assistant message in body (default: 2000)
 ```
 
 Subject prefixes distinguish the two: session-complete emails start with `[oc-done]`, needs-input emails with `[oc-need_input]`. Subjects and bodies are session-oriented, e.g. `[oc-done] <session title>` / `Session <name> complete: all agents done at ...` and `[oc-need_input] <session title>` / `Session <name>: agent <name> needs input at ...`.
