@@ -41,6 +41,16 @@ encode_subject() {
     printf '=?UTF-8?B?%s?=' "$(printf '%s' "$1" | base64 -w0)"
 }
 
+truncate_body() {
+    local text="$1"
+    local limit="${2:-2000}"
+    if [ "${#text}" -gt "$limit" ]; then
+        printf '%s...(truncated)' "${text:0:$limit}"
+    else
+        printf '%s' "$text"
+    fi
+}
+
 session_all_done() {
     local panes p st found_done=0
     panes=$(tmux list-panes -t "$1" -F '#{pane_id}' 2>/dev/null || true)
@@ -115,7 +125,13 @@ case "${AGENT_STATE:-}" in
             subject="[oc-need_input] session ${AGENT_SESSION:-unknown} needs input"
         fi
         subject_enc=$(encode_subject "$subject")
-        body="Session ${AGENT_SESSION:-unknown}: agent ${agent} needs input at $(date '+%Y-%m-%d %H:%M:%S')"
+        body_limit=$(tmux_get_option "@agent-indicator-email-body-limit")
+        body_limit="${body_limit:-2000}"
+        if [ -n "${OPENCODE_LAST_MESSAGE:-}" ]; then
+            body="$(truncate_body "$OPENCODE_LAST_MESSAGE" "$body_limit")"
+        else
+            body="Session ${AGENT_SESSION:-unknown}: agent ${agent} needs input at $(date '+%Y-%m-%d %H:%M:%S')"
+        fi
 
         send_email "$email_to" "$subject" "$subject_enc" "$body" "$agent"
         exit 0
@@ -146,7 +162,13 @@ case "${AGENT_STATE:-}" in
             subject="[oc-done] session ${AGENT_SESSION:-unknown} complete"
         fi
         subject_enc=$(encode_subject "$subject")
-        body="Session ${AGENT_SESSION:-unknown} complete: all agents done at $(date '+%Y-%m-%d %H:%M:%S')"
+        body_limit=$(tmux_get_option "@agent-indicator-email-body-limit")
+        body_limit="${body_limit:-2000}"
+        if [ -n "${OPENCODE_LAST_MESSAGE:-}" ]; then
+            body="$(truncate_body "$OPENCODE_LAST_MESSAGE" "$body_limit")"
+        else
+            body="Session ${AGENT_SESSION:-unknown} complete: all agents done at $(date '+%Y-%m-%d %H:%M:%S')"
+        fi
 
         send_email "$email_to" "$subject" "$subject_enc" "$body" "$agent"
         exit 0
