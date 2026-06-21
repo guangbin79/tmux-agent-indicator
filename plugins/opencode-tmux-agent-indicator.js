@@ -10,6 +10,7 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
   let lastState = "off";
   let idleAt = 0;
   let sessionTitle = "";
+  let lastAssistantMessage = "";
 
   const resolveSessionTitle = async (sessionID) => {
     try {
@@ -20,6 +21,26 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
     }
   };
 
+  const resolveLastAssistantMessage = async (sessionID) => {
+    try {
+      const res = await client.session.messages({
+        path: { id: sessionID },
+        query: { limit: 20 },
+      });
+      const messages = Array.isArray(res?.data) ? res.data : [];
+      const lastAssistant = [...messages]
+        .reverse()
+        .find((m) => m?.info?.role === "assistant");
+      lastAssistantMessage = (lastAssistant?.parts || [])
+        .filter((p) => p?.type === "text" && typeof p.text === "string")
+        .map((p) => p.text)
+        .join("\n")
+        .trim();
+    } catch {
+      lastAssistantMessage = "";
+    }
+  };
+
   const setState = async (state) => {
     if (state === lastState) return;
     lastState = state;
@@ -27,7 +48,7 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
       if (state === "running") {
         await $`bash ${script} --agent opencode --state off`;
       }
-      await $`OPENCODE_SESSION_TITLE=${sessionTitle} bash ${script} --agent opencode --state ${state}`;
+      await $`OPENCODE_SESSION_TITLE=${sessionTitle} OPENCODE_LAST_MESSAGE=${lastAssistantMessage} bash ${script} --agent opencode --state ${state}`;
     } catch {
       // non-fatal: tmux may not be available
     }
@@ -51,6 +72,7 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
         idleAt = Date.now();
         if (event.properties?.sessionID) {
           await resolveSessionTitle(event.properties.sessionID);
+          await resolveLastAssistantMessage(event.properties.sessionID);
         }
         await setState("done");
       }
@@ -59,6 +81,7 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
         idleAt = Date.now();
         if (event.properties?.sessionID) {
           await resolveSessionTitle(event.properties.sessionID);
+          await resolveLastAssistantMessage(event.properties.sessionID);
         }
         await setState("done");
       }
