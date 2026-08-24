@@ -11,8 +11,10 @@ setup_test_server "notif-env"
 # Capture files for two scenarios
 CAPTURE_UNSET="/tmp/tmux-agent-indicator-${SOCK}-notif-env-unset-${RANDOM}.txt"
 CAPTURE_SET="/tmp/tmux-agent-indicator-${SOCK}-notif-env-set-${RANDOM}.txt"
+CAPTURE_DISPLAY_OFF="/tmp/tmux-agent-indicator-${SOCK}-notif-env-display-off-${RANDOM}.txt"
 register_tmp_file "$CAPTURE_UNSET"
 register_tmp_file "$CAPTURE_SET"
+register_tmp_file "$CAPTURE_DISPLAY_OFF"
 
 tmux_cmd set -g @agent-indicator-notification-enabled 'on'
 tmux_cmd set -g @agent-indicator-notification-states 'needs-input,done'
@@ -62,4 +64,33 @@ if ! grep -q '^AGENT_STATE=done$' "$CAPTURE_SET"; then
     fail "AGENT_STATE not forwarded (scenario 2)"
 fi
 
+# ---------------------------------------------------------------------------
+# Scenario 3: notification-display 'off' must keep the notification-command
+# (email) chain firing. The tmux popup itself cannot be asserted in a
+# headless socket; the suppression lives in the display-message guard in
+# notify_state_change(), so this pins the surviving ext_cmd path.
+# ---------------------------------------------------------------------------
+tmux_cmd set -g @agent-indicator-notification-display 'off'
+tmux_cmd set -g @agent-indicator-notification-command "env > '$CAPTURE_DISPLAY_OFF'"
+tmux_cmd run-shell \
+    "TMUX_PANE=$PANE \"$ROOT_DIR/scripts/agent-state.sh\" --agent opencode --state needs-input"
+
+sleep 0.3
+
+if ! grep -q '^AGENT_NAME=opencode$' "$CAPTURE_DISPLAY_OFF"; then
+    fail "AGENT_NAME not forwarded with notification-display off"
+fi
+
+if ! grep -q '^AGENT_STATE=needs-input$' "$CAPTURE_DISPLAY_OFF"; then
+    fail "AGENT_STATE not forwarded with notification-display off"
+fi
+
+if ! grep -q '^OPENCODE_LAST_MESSAGE=$' "$CAPTURE_DISPLAY_OFF"; then
+    fail "OPENCODE_LAST_MESSAGE not forwarded with notification-display off"
+fi
+
+# Restore defaults for later consumers of this server
+tmux_cmd set -g @agent-indicator-notification-display 'on'
+
+pass "notification-command fires with notification-display off (email chain intact)"
 pass "notification-command receives OPENCODE_LAST_MESSAGE and standard env vars"

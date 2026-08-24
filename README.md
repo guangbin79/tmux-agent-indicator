@@ -208,6 +208,7 @@ set -g @agent-indicator-notification-enabled 'on'
 set -g @agent-indicator-notification-states 'needs-input,done'
 set -g @agent-indicator-notification-format '[#{agent_name}] #{agent_state} (#{session_name}:#{window_name})'
 set -g @agent-indicator-notification-duration '5000'
+set -g @agent-indicator-notification-display 'on'
 set -g @agent-indicator-notification-command ''
 
 # Session dots (visual session indicator in status bar)
@@ -312,6 +313,10 @@ set -g @agent-indicator-notification-states 'done'
 set -g @agent-indicator-notification-format '#{agent_name} is #{agent_state} in #{session_name}'
 
 # Duration in milliseconds (0 = use tmux default display-time)
+set -g @agent-indicator-notification-duration '3000'
+
+# Suppress the tmux popup while keeping notification-command (e.g. email) firing
+set -g @agent-indicator-notification-display 'off'
 set -g @agent-indicator-notification-duration '3000'
 ```
 

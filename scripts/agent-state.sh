@@ -318,10 +318,14 @@ notify_state_change() {
     message="${message//\#\{window_name\}/$window_name}"
     message="${message//\#\{window_index\}/$window_index}"
 
-    if [ -n "$duration" ] && [ "$duration" != "0" ]; then
-        tmux display-message -d "$duration" "$message" || true
-    else
-        tmux display-message "$message" || true
+    local display_enabled
+    display_enabled=$(tmux_get_option_or_default "@agent-indicator-notification-display" "on")
+    if is_enabled "$display_enabled"; then
+        if [ -n "$duration" ] && [ "$duration" != "0" ]; then
+            tmux display-message -d "$duration" "$message" || true
+        else
+            tmux display-message "$message" || true
+        fi
     fi
 
     local ext_cmd
