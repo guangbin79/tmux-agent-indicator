@@ -54,4 +54,28 @@ done
 run_without_tmux_pane "done"
 wait_for_env_value "TMUX_AGENT_PANE_${PANE}_STATE" "done"
 
+# Scenario C (regression, tmux 3.2a): a dead pane candidate (its window
+# killed, env keys left behind) must be skipped by the scan and the
+# transition must fall through to the active pane. On tmux 3.2a,
+# `display-message -p -t <dead-pane>` prints an empty id but exits 0,
+# so the old exit-code-only pane_exists always returned true: the dead
+# candidate won the scan, select-pane crashed, and state was written to
+# the dead pane's keys instead of the live pane's.
+tmux_cmd kill-window -t "$OTHER_WIN"
+tmux_cmd set-environment -g "TMUX_AGENT_PANE_${OTHER_PANE}_AGENT" "claude"
+tmux_cmd set-environment -g "TMUX_AGENT_PANE_${OTHER_PANE}_STATE" "running"
+for key in "TMUX_AGENT_PANE_${PANE}_AGENT" \
+    "TMUX_AGENT_PANE_${PANE}_STATE" \
+    "TMUX_AGENT_PANE_${PANE}_DONE" \
+    "TMUX_AGENT_PANE_${PANE}_DONE_WINDOW" \
+    "TMUX_AGENT_PANE_${PANE}_PENDING_RESET" \
+    "TMUX_AGENT_ACTIVE_PANE_claude"; do
+    tmux_cmd set-environment -gu "$key" 2>/dev/null || true
+done
+run_without_tmux_pane "done"
+wait_for_env_value "TMUX_AGENT_PANE_${PANE}_STATE" "done"
+dead_state="$(get_env "TMUX_AGENT_PANE_${OTHER_PANE}_STATE")"
+[ "$dead_state" = "running" ] || \
+    fail "dead pane state key must stay 'running', got '${dead_state:-<empty>}'"
+
 pass "fallback pane resolution picks running candidate first, then active pane"
