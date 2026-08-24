@@ -29,6 +29,9 @@ cleanup_test_server() {
     for path in "${TEST_TMP_FILES[@]:-}"; do
         rm -f "$path" >/dev/null 2>&1 || true
     done
+    # register_tmp_file can't survive command substitution (subshell array);
+    # sweep every tmp file this run created via the SOCK-name prefix instead.
+    rm -f /tmp/tmux-agent-indicator-"${SOCK}"-* 2>/dev/null || true
 }
 
 setup_test_server() {
