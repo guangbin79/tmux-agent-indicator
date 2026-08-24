@@ -8,7 +8,10 @@ This repository is a tmux plugin written in Bash.
 - `scripts/pane-focus-in.sh`: clears deferred `done` styling when pane/window focus changes.
 - `scripts/indicator.sh`: status segment renderer (icons + process/state detection).
 - `hooks/claude-hooks.json`: Claude hook template.
-- `docs/`: product notes and testing docs (`docs/PRD.md`, `docs/TESTING.md`, assets).
+- `adapters/codex-notify.sh`: Codex notify adapter mapping events to states.
+- `plugins/opencode-tmux-agent-indicator.js`: OpenCode plugin wiring session/permission events to agent-state.sh.
+- `tests/`: isolated tmux-socket test suite (`tests/run-all.sh`, plus `tests/test-plugin-events.mjs` node stub-driver).
+- `docs/`: testing docs (`docs/TESTING.md`) and specs/assets.
 
 Keep runtime logic in `scripts/`; keep `agent-indicator.tmux` focused on bootstrap/hook wiring.
 

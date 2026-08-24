@@ -38,12 +38,15 @@ States reset when you focus the pane/window, or on the next transition.
 
 tmux 3.0+, bash 4+
 
+- `python3`: installer only (Claude/Codex wiring)
+- `mail` or `sendmail`, or a custom `@agent-indicator-email-command`: email notifications
+
 ## Installation
 
 ### One-command installer (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/accessd/tmux-agent-indicator/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/guangbin79/tmux-agent-indicator/main/install.sh | bash
 ```
 
 The installer will offer to run the interactive color setup wizard. You can also run it later:
@@ -70,7 +73,7 @@ Integration uninstall options:
 Add to ~/.tmux.conf:
 
 ```tmux
-set -g @plugin 'accessd/tmux-agent-indicator'
+set -g @plugin 'guangbin79/tmux-agent-indicator'
 ```
 
 Reload tmux:
@@ -154,6 +157,9 @@ set -g @agent-indicator-reset-on-focus 'on'
 set -g @agent-indicator-animation-enabled 'on'
 ```
 
+Note: the animation refreshes the status bar every tick (`@agent-indicator-animation-speed`, default 300ms). Keep it off on minimal setups or slow terminals.
+
+Note: unlike needs-input/done, the running state also styles the currently focused window's title — the window you are in signals that an agent is working.
 <details>
 <summary>Full configuration reference</summary>
 
@@ -369,8 +375,10 @@ It maps:
 
 The installer copies `plugins/opencode-tmux-agent-indicator.js` to `~/.config/opencode/plugins/`. The plugin uses OpenCode's event system:
 - `session.status` (busy) -> `running`
-- `permission.updated` -> `needs-input`
-- `session.idle` -> `done`
+- `session.status` (idle) and `session.idle` -> `done`
+- `permission.asked` -> `needs-input`
+- `permission.replied` -> `running`
+- `session.error` -> `done`
 
 To install manually without the installer, copy the plugin file:
 
