@@ -196,9 +196,13 @@ apply_pane_style() {
 }
 
 pane_exists() {
+    # tmux 3.2a prints an empty pane id and exits 0 for dead targets,
+    # so verify the resolved id instead of trusting the exit code.
     local pane_id="$1"
+    local resolved
     [ -n "$pane_id" ] || return 1
-    tmux display-message -p -t "$pane_id" '#{pane_id}' >/dev/null 2>&1
+    resolved=$(tmux display-message -p -t "$pane_id" '#{pane_id}' 2>/dev/null) || return 1
+    [ "$resolved" = "$pane_id" ]
 }
 
 start_animation() {
