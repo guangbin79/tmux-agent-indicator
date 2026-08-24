@@ -14,6 +14,7 @@ setup_test_server "email-body"
 capture_email_body() {
     local state="$1"
     local message="$2"
+    local detail="${3:-}"
     local capture_file="/tmp/tmux-agent-indicator-${SOCK}-email-${RANDOM}.txt"
     register_tmp_file "$capture_file"
 
@@ -26,7 +27,8 @@ capture_email_body() {
     tmux_cmd set-environment -g "TMUX_AGENT_PANE_${PANE}_STATE" "done"
 
     tmux_cmd run-shell \
-        "OPENCODE_LAST_MESSAGE='$message' \
+        "OPENCODE_STATE_DETAIL='$detail' \
+         OPENCODE_LAST_MESSAGE='$message' \
          AGENT_NAME='opencode' \
          AGENT_STATE='$state' \
          AGENT_SESSION='ai' \
@@ -102,5 +104,51 @@ if ! grep -q '\.\.\.(truncated)$' <<< "$body"; then
     fail "garbage body-limit should fall back to default 2000 and still truncate"
 fi
 tmux_cmd set -gu '@agent-indicator-email-body-limit'  # reset
+
+# Test 9 (T3a): needs-input detail + message -> detail line, blank line, message
+body="$(capture_email_body 'needs-input' 'agent needs database choice' '[bash] git push')"
+if [ "$body" != $'[bash] git push\n\nagent needs database choice' ]; then
+    fail "needs-input body should be detail + blank line + message"
+fi
+
+# Test 10 (T3b): needs-input detail only -> body is exactly the detail
+body="$(capture_email_body 'needs-input' '' '[bash] git push')"
+if [ "$body" != '[bash] git push' ]; then
+    fail "needs-input detail-only body should be exactly the detail line"
+fi
+
+# Test 11 (T3c): needs-input message only (explicit empty detail) -> body is the message
+body="$(capture_email_body 'needs-input' 'agent needs database choice' '')"
+if ! grep -q '^agent needs database choice$' <<< "$body"; then
+    fail "needs-input message-only body should contain OPENCODE_LAST_MESSAGE verbatim"
+fi
+
+# Test 12 (T3d): multi-line detail preserved line-by-line through run-shell
+body="$(capture_email_body 'needs-input' '' $'[question] A?\n[question] B?')"
+if [ "$body" != $'[question] A?\n[question] B?' ]; then
+    fail "multi-line detail should be preserved verbatim as body"
+fi
+
+# Test 13 (T3e): truncation applies to the combined detail + message string
+T3E_MESSAGE="$(printf 'a%.0s' {1..2500})"
+body="$(capture_email_body 'needs-input' "$T3E_MESSAGE" '[bash] x')"
+body_len="${#body}"
+if [ "$body_len" -ne 2014 ]; then
+    fail "combined body should be exactly limit 2000 + 14-char marker (got $body_len)"
+fi
+if [ "${body:0:8}" != '[bash] x' ]; then
+    fail "combined body should start with the detail line (truncation on combined string)"
+fi
+if ! grep -q '\.\.\.(truncated)$' <<< "$body"; then
+    fail "combined body should end with ...(truncated)"
+fi
+
+# Test 14 (T3f): done with error detail -> detail line first, message after
+body="$(capture_email_body 'done' 'cleanup finished' '[error] ApiError: boom')"
+if [ "$body" != $'[error] ApiError: boom\n\ncleanup finished' ]; then
+    fail "done error body should be detail + blank line + message"
+fi
+
+# T3g: done without detail keeps current behavior (covered by Tests 3/4 above).
 
 pass "email body replacement, fallback, and truncation"

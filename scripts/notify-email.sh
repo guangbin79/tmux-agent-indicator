@@ -51,6 +51,21 @@ truncate_body() {
     fi
 }
 
+compose_state_body() {
+    local detail="$1"
+    local message="$2"
+    local fallback="$3"
+    if [ -n "$detail" ] && [ -n "$message" ]; then
+        printf '%s\n\n%s' "$detail" "$message"
+    elif [ -n "$detail" ]; then
+        printf '%s' "$detail"
+    elif [ -n "$message" ]; then
+        printf '%s' "$message"
+    else
+        printf '%s' "$fallback"
+    fi
+}
+
 session_all_done() {
     local panes p st found_done=0
     panes=$(tmux list-panes -s -t "$1" -F '#{pane_id}' 2>/dev/null || true)
@@ -130,11 +145,9 @@ case "${AGENT_STATE:-}" in
         body_limit=$(tmux_get_option "@agent-indicator-email-body-limit")
         body_limit="${body_limit:-2000}"
         case "$body_limit" in ''|*[!0-9]*) body_limit=2000 ;; esac
-        if [ -n "${OPENCODE_LAST_MESSAGE:-}" ]; then
-            body="$(truncate_body "$OPENCODE_LAST_MESSAGE" "$body_limit")"
-        else
-            body="Session ${AGENT_SESSION:-unknown}: agent ${agent} needs input at $(date '+%Y-%m-%d %H:%M:%S')"
-        fi
+        body="$(compose_state_body "${OPENCODE_STATE_DETAIL:-}" "${OPENCODE_LAST_MESSAGE:-}" \
+            "Session ${AGENT_SESSION:-unknown}: agent ${agent} needs input at $(date '+%Y-%m-%d %H:%M:%S')")"
+        body="$(truncate_body "$body" "$body_limit")"
 
         send_email "$email_to" "$subject" "$subject_enc" "$body" "$agent"
         exit 0
@@ -169,11 +182,9 @@ case "${AGENT_STATE:-}" in
         body_limit=$(tmux_get_option "@agent-indicator-email-body-limit")
         body_limit="${body_limit:-2000}"
         case "$body_limit" in ''|*[!0-9]*) body_limit=2000 ;; esac
-        if [ -n "${OPENCODE_LAST_MESSAGE:-}" ]; then
-            body="$(truncate_body "$OPENCODE_LAST_MESSAGE" "$body_limit")"
-        else
-            body="Session ${AGENT_SESSION:-unknown} complete: all agents done at $(date '+%Y-%m-%d %H:%M:%S')"
-        fi
+        body="$(compose_state_body "${OPENCODE_STATE_DETAIL:-}" "${OPENCODE_LAST_MESSAGE:-}" \
+            "Session ${AGENT_SESSION:-unknown} complete: all agents done at $(date '+%Y-%m-%d %H:%M:%S')")"
+        body="$(truncate_body "$body" "$body_limit")"
 
         send_email "$email_to" "$subject" "$subject_enc" "$body" "$agent"
         exit 0
