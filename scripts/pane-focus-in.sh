@@ -121,7 +121,7 @@ if [ "$window_done" = "1" ] || [ "$state" = "done" ] || [ "$done_marker" = "1" ]
         tmux_unset_env "${pane_prefix}_PENDING_RESET"
         tmux_unset_env "${pane_prefix}_STATE"
         tmux_unset_env "${pane_prefix}_AGENT"
-    done < <(tmux show-environment -g | rg "^TMUX_AGENT_PANE_.*_DONE_WINDOW=${done_window}$" || true)
+    done < <(tmux show-environment -g | grep "^TMUX_AGENT_PANE_.*_DONE_WINDOW=${done_window}$" || true)
 
     # Stop animation if no panes are still running.
     if ! tmux show-environment -g 2>/dev/null | grep -q '_STATE=running'; then

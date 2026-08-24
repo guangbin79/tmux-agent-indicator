@@ -264,7 +264,7 @@ resolve_target_pane() {
                     fi
                     ;;
             esac
-        done < <(tmux show-environment -g | rg "^TMUX_AGENT_PANE_.*_AGENT=${agent}$" || true)
+        done < <(tmux show-environment -g | grep "^TMUX_AGENT_PANE_.*_AGENT=${agent}$" || true)
 
         if [ -n "$running_candidate" ]; then
             pane="$running_candidate"
@@ -442,6 +442,7 @@ case "$state" in
             restore_active_border_style "$window_id"
         fi
 
+        # Intentional: running styles apply to the active window too (unlike needs-input/done) so the current window signals activity.
         apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg"
         start_animation
         notify_state_change "$agent" "$state" "$pane_id"
