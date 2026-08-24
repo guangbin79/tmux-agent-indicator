@@ -24,7 +24,7 @@ if [ -n "$SCRIPT_SOURCE" ] && [ -f "$SCRIPT_SOURCE" ]; then
 fi
 
 if [ -z "$SCRIPT_DIR" ] || [ ! -f "$SCRIPT_DIR/agent-indicator.tmux" ]; then
-    INSTALL_REPO="${TMUX_AGENT_INSTALL_REPO:-accessd/tmux-agent-indicator}"
+    INSTALL_REPO="${TMUX_AGENT_INSTALL_REPO:-guangbin79/tmux-agent-indicator}"
     INSTALL_REF="${TMUX_AGENT_INSTALL_REF:-main}"
     ARCHIVE_URL="https://codeload.github.com/${INSTALL_REPO}/tar.gz/refs/heads/${INSTALL_REF}"
 
@@ -283,12 +283,16 @@ if uninstall:
         "",
         text,
     )
-elif pattern.search(text):
-    text = pattern.sub(notify_line, text, count=1)
 else:
-    if text and not text.endswith("\n"):
-        text += "\n"
-    text += notify_line + "\n"
+    m = pattern.search(text)
+    if m and "codex-notify.sh" not in m.group(0):
+        print("existing notify entry is not tmux-agent-indicator; leaving unchanged")
+    elif m:
+        text = pattern.sub(notify_line, text, count=1)
+    else:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += notify_line + "\n"
 
 config_path.write_text(text, encoding="utf-8")
 PY
@@ -314,7 +318,7 @@ Installed/updated tmux-agent-indicator in:
   $TARGET_DIR
 
 Add to ~/.tmux.conf (TPM):
-  set -g @plugin 'accessd/tmux-agent-indicator'
+  set -g @plugin 'guangbin79/tmux-agent-indicator'
 
 Or direct load:
   run-shell '$TARGET_DIR/agent-indicator.tmux'
