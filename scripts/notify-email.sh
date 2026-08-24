@@ -53,7 +53,7 @@ truncate_body() {
 
 session_all_done() {
     local panes p st found_done=0
-    panes=$(tmux list-panes -t "$1" -F '#{pane_id}' 2>/dev/null || true)
+    panes=$(tmux list-panes -s -t "$1" -F '#{pane_id}' 2>/dev/null || true)
     [ -z "$panes" ] && return 1
     while IFS= read -r p; do
         [ -z "$p" ] && continue
@@ -105,9 +105,11 @@ case "${AGENT_STATE:-}" in
         # Throttle: at most one needs-input email per window per session.
         throttle=$(tmux_get_option "@agent-indicator-email-needs-input-throttle")
         throttle="${throttle:-30}"
+        case "$throttle" in ''|*[!0-9]*) throttle=30 ;; esac
         last_key="TMUX_AGENT_SESSION_${session}_EMAIL_NEEDS_INPUT_LAST"
         last=$(tmux_get_env "$last_key")
         last="${last:-0}"
+        case "$last" in ''|*[!0-9]*) last=0 ;; esac
         now=$(date +%s)
         if [ "$((now - last))" -lt "$throttle" ]; then
             exit 0
@@ -127,6 +129,7 @@ case "${AGENT_STATE:-}" in
         subject_enc=$(encode_subject "$subject")
         body_limit=$(tmux_get_option "@agent-indicator-email-body-limit")
         body_limit="${body_limit:-2000}"
+        case "$body_limit" in ''|*[!0-9]*) body_limit=2000 ;; esac
         if [ -n "${OPENCODE_LAST_MESSAGE:-}" ]; then
             body="$(truncate_body "$OPENCODE_LAST_MESSAGE" "$body_limit")"
         else
@@ -142,6 +145,7 @@ case "${AGENT_STATE:-}" in
 
         delay=$(tmux_get_option "@agent-indicator-email-delay")
         delay="${delay:-60}"
+        case "$delay" in ''|*[!0-9]*) delay=60 ;; esac
 
         session="${AGENT_SESSION:-}"
         [ -n "$session" ] || exit 0
@@ -164,6 +168,7 @@ case "${AGENT_STATE:-}" in
         subject_enc=$(encode_subject "$subject")
         body_limit=$(tmux_get_option "@agent-indicator-email-body-limit")
         body_limit="${body_limit:-2000}"
+        case "$body_limit" in ''|*[!0-9]*) body_limit=2000 ;; esac
         if [ -n "${OPENCODE_LAST_MESSAGE:-}" ]; then
             body="$(truncate_body "$OPENCODE_LAST_MESSAGE" "$body_limit")"
         else

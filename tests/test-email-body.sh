@@ -86,4 +86,21 @@ if ! grep -q '\.\.\.(truncated)$' <<< "$body"; then
 fi
 tmux_cmd set -gu '@agent-indicator-email-body-limit'  # reset
 
+# Test 7: garbage LAST env value falls back to 0 (treated as never-sent)
+tmux_cmd set-environment -g "TMUX_AGENT_SESSION_ai_EMAIL_NEEDS_INPUT_LAST" "garbage"
+body="$(capture_email_body 'needs-input' 'agent needs database choice')"
+if ! grep -q '^agent needs database choice$' <<< "$body"; then
+    fail "garbage LAST env should fall back to 0 and still send needs-input email"
+fi
+tmux_cmd set-environment -gu "TMUX_AGENT_SESSION_ai_EMAIL_NEEDS_INPUT_LAST"
+
+# Test 8: garbage @agent-indicator-email-body-limit falls back to 2000
+tmux_cmd set -g @agent-indicator-email-body-limit 'abc'
+GARBAGE_LIMIT_MESSAGE="$(printf 'c%.0s' {1..2500})"
+body="$(capture_email_body 'done' "$GARBAGE_LIMIT_MESSAGE")"
+if ! grep -q '\.\.\.(truncated)$' <<< "$body"; then
+    fail "garbage body-limit should fall back to default 2000 and still truncate"
+fi
+tmux_cmd set -gu '@agent-indicator-email-body-limit'  # reset
+
 pass "email body replacement, fallback, and truncation"
