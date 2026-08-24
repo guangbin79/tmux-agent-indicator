@@ -9,9 +9,11 @@ tests=(
     "$ROOT_DIR/tests/test-indicator-output.sh"
     "$ROOT_DIR/tests/test-focus-reset-done.sh"
     "$ROOT_DIR/tests/test-email-body.sh"
+    "$ROOT_DIR/tests/test-email-multi-window.sh"
     "$ROOT_DIR/tests/test-window-title-reset.sh"
     "$ROOT_DIR/tests/test-running-animation.sh"
     "$ROOT_DIR/tests/test-notification-env-forwarding.sh"
+    "$ROOT_DIR/tests/test-fallback-pane-resolution.sh"
 )
 
 failed_tests=()
@@ -22,6 +24,13 @@ for test_script in "${tests[@]}"; do
         failed_tests+=("$(basename "$test_script")")
     fi
 done
+
+if command -v node >/dev/null 2>&1; then
+    echo "==> tests/test-plugin-events.mjs"
+    if ! node "$ROOT_DIR/tests/test-plugin-events.mjs"; then
+        failed_tests+=("test-plugin-events.mjs")
+    fi
+fi
 
 if [ "${#failed_tests[@]}" -gt 0 ]; then
     echo "FAIL: ${#failed_tests[@]} test(s) failed:" >&2

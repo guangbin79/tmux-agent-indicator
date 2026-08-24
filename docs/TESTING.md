@@ -25,9 +25,11 @@ Run individual checks:
 ./tests/test-indicator-output.sh
 ./tests/test-focus-reset-done.sh
 ./tests/test-email-body.sh
+./tests/test-email-multi-window.sh
 ./tests/test-window-title-reset.sh
 ./tests/test-running-animation.sh
 ./tests/test-notification-env-forwarding.sh
+./tests/test-fallback-pane-resolution.sh
 ```
 
 Manual tmux-socket commands (below) are still useful for debugging.
