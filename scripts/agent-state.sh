@@ -340,6 +340,7 @@ notify_state_change() {
         AGENT_PANE="$pane_id" \
         OPENCODE_LAST_MESSAGE="${OPENCODE_LAST_MESSAGE:-}" \
         OPENCODE_STATE_DETAIL="${OPENCODE_STATE_DETAIL:-}" \
+        OPENCODE_SESSION_TITLE="${OPENCODE_SESSION_TITLE:-}" \
         bash -c "$ext_cmd" 2>/dev/null &
     fi
 }

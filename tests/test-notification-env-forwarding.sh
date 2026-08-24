@@ -13,10 +13,12 @@ CAPTURE_UNSET="/tmp/tmux-agent-indicator-${SOCK}-notif-env-unset-${RANDOM}.txt"
 CAPTURE_SET="/tmp/tmux-agent-indicator-${SOCK}-notif-env-set-${RANDOM}.txt"
 CAPTURE_DISPLAY_OFF="/tmp/tmux-agent-indicator-${SOCK}-notif-env-display-off-${RANDOM}.txt"
 CAPTURE_DETAIL="/tmp/tmux-agent-indicator-${SOCK}-notif-env-detail-${RANDOM}.txt"
+CAPTURE_TITLE="/tmp/tmux-agent-indicator-${SOCK}-notif-env-title-${RANDOM}.txt"
 register_tmp_file "$CAPTURE_UNSET"
 register_tmp_file "$CAPTURE_SET"
 register_tmp_file "$CAPTURE_DISPLAY_OFF"
 register_tmp_file "$CAPTURE_DETAIL"
+register_tmp_file "$CAPTURE_TITLE"
 
 tmux_cmd set -g @agent-indicator-notification-enabled 'on'
 tmux_cmd set -g @agent-indicator-notification-states 'needs-input,done'
@@ -121,9 +123,36 @@ if ! grep -q '^OPENCODE_STATE_DETAIL=\[bash\] git push$' "$CAPTURE_DETAIL"; then
     fail "OPENCODE_STATE_DETAIL='[bash] git push' not propagated to notification-command subshell"
 fi
 
+# ---------------------------------------------------------------------------
+# Scenario 6: OPENCODE_SESSION_TITLE (README '[oc-need_input] <session title>'
+# subject path). Two runs share one capture: unset must arrive as an empty-
+# valued key — this pins the explicit forwarding line in notify_state_change(),
+# because without it the key is absent from the subshell env (set values would
+# sneak through via plain env inheritance alone). Set must arrive verbatim; the
+# value contains spaces, so it must be single-quoted inside the run-shell string.
+tmux_cmd set -g @agent-indicator-notification-command "env > '$CAPTURE_TITLE'"
+tmux_cmd run-shell \
+    "TMUX_PANE=$PANE \"$ROOT_DIR/scripts/agent-state.sh\" --agent opencode --state needs-input"
+
+sleep 0.3
+
+if ! grep -q '^OPENCODE_SESSION_TITLE=$' "$CAPTURE_TITLE"; then
+    fail "OPENCODE_SESSION_TITLE not forwarded when unset"
+fi
+
+tmux_cmd run-shell \
+    "OPENCODE_SESSION_TITLE='F3 Smoke Session' TMUX_PANE=$PANE \"$ROOT_DIR/scripts/agent-state.sh\" --agent opencode --state needs-input"
+
+sleep 0.3
+
+if ! grep -q '^OPENCODE_SESSION_TITLE=F3 Smoke Session$' "$CAPTURE_TITLE"; then
+    fail "OPENCODE_SESSION_TITLE='F3 Smoke Session' not propagated to notification-command subshell"
+fi
+
 # Restore defaults for later consumers of this server
 tmux_cmd set -g @agent-indicator-notification-display 'on'
 
 pass "notification-command fires with notification-display off (email chain intact)"
 pass "notification-command receives OPENCODE_LAST_MESSAGE and standard env vars"
 pass "notification-command receives OPENCODE_STATE_DETAIL (unset -> empty, set -> verbatim)"
+pass "notification-command receives OPENCODE_SESSION_TITLE (session-title subject path)"
