@@ -341,7 +341,9 @@ A bundled `scripts/notify-email.sh` emails you on two events:
 
 Completion is based on hook-tracked state, so a persistent agent CLI (e.g. an idle opencode or codex process that stays running) does not block the email — once the agent reports `done` via its hook, it counts as done. Make sure each agent's hook integration is installed (the installer wires up Claude/Codex/OpenCode) so its state is tracked.
 
-The email body includes the OpenCode agent's last assistant message when available (for `done` and `needs-input` events). For other agents (Claude, Codex), or if the message cannot be retrieved, the body falls back to the standard one-line summary. Configure truncation via `@agent-indicator-email-body-limit` (default 2000 characters).
+For OpenCode, events also supply a detail line: a permission ask yields `[<permission>] <patterns>` (e.g. `[bash] git push, ls`), a question yields one `[question] <full question text>` line per question (with ` (options: <label ...>)` appended when the question has options), and a session error yields `[error] <name>: <message>`.
+
+A `needs-input` email body is the detail line, then a blank line, then the OpenCode agent's last assistant message. If either part is missing, the body is whichever part exists; if neither exists, it falls back to the standard one-line summary. A `done` email carries the detail line only when the done state came from a session error (`[error] ...`, blank line, then the body); normal `done` emails contain just the assistant message. For other agents (Claude, Codex), or if the message cannot be retrieved, the body falls back to the standard one-line summary. Truncation via `@agent-indicator-email-body-limit` (default 2000 characters) applies to the full composed body.
 
 ```tmux
 set -g @agent-indicator-notification-command 'bash ~/.tmux/plugins/tmux-agent-indicator/scripts/notify-email.sh'
@@ -382,8 +384,11 @@ The installer copies `plugins/opencode-tmux-agent-indicator.js` to `~/.config/op
 - `session.status` (busy) -> `running`
 - `session.status` (idle) and `session.idle` -> `done`
 - `permission.asked` -> `needs-input`
+- `question.asked` -> `needs-input`
 - `permission.replied` -> `running`
 - `session.error` -> `done`
+
+Note: `needs-input` triggering and the email detail line rely on OpenCode's `permission.asked` and `question.asked` events. Older OpenCode versions that do not emit these events will not trigger `needs-input` (known trade-off).
 
 To install manually without the installer, copy the plugin file:
 

@@ -179,7 +179,7 @@ screencapture -x /tmp/tmux-agent-indicator-check.png
 
 ## Email Notification Manual Test
 
-Verifies the email body includes the OpenCode agent's last assistant message for `done` and `needs-input` events. Requires a working email sender (`mail` or `sendmail`) OR a custom `@agent-indicator-email-command` to capture the body.
+Verifies email bodies for `done` and `needs-input` events: OpenCode event detail lines (permission/question/error) plus the agent's last assistant message. Requires a working email sender (`mail` or `sendmail`) OR a custom `@agent-indicator-email-command` to capture the body (e.g. `cat > /tmp/oc-email.txt`, the same capture pattern `tests/test-email-body.sh` uses).
 
 ### Setup
 
@@ -206,10 +206,8 @@ Verifies the email body includes the OpenCode agent's last assistant message for
 1. In an OpenCode session, trigger a permission ask (e.g., agent requests tool approval).
 2. Verify the received email:
    - **Subject:** starts with `[oc-need_input]`
-   - **Body:** depends on whether the plugin has resolved a prior `session.idle`/`session.error` in the same session:
-     - **First-turn permission ask** (no prior idle): body falls back to the standard one-line summary (`Session <name>: agent opencode needs input at <timestamp>`).
-     - **Subsequent turns**: body shows the assistant message captured at the most recent `session.idle`/`session.error` — i.e. the agent's final response from the *previous* turn, not the question text from the current permission ask.
-   - This is a known design trade-off: `needs-input` events don't carry enough context to fetch a fresh "current question" message, so the plugin reuses the last resolved value. The fallback path guarantees the email is still sent with usable context.
+   - **Body:** first line is the event detail (e.g. `[bash] git push` for a permission ask, or `[question] <full question text>` for a question), followed by a blank line and the assistant message captured at the most recent `session.idle`/`session.error`.
+   - If either part is missing, the body is whichever part exists; if neither exists, it falls back to the standard one-line summary (`Session <name>: agent opencode needs input at <timestamp>`).
 
 ### Scenario 3: Fallback for non-OpenCode agents
 
@@ -230,3 +228,13 @@ Verifies the email body includes the OpenCode agent's last assistant message for
 1. Block the OpenCode API (e.g., kill the OpenCode server mid-session, or break networking).
 2. Trigger a state transition that would normally fetch the last assistant message.
 3. Verify the email body falls back to the one-line summary (no email is lost).
+
+### Scenario 6: `done` email from a session error carries the error detail
+
+1. Configure a capture sender: `tmux set -g @agent-indicator-email-command 'cat > /tmp/oc-email.txt'`
+2. Mark the current pane done so the session-complete check passes: `tmux set-environment -g TMUX_AGENT_PANE_<pane-id>_STATE done`
+3. Invoke the script directly with an error detail (same env channel the OpenCode plugin uses):
+   ```bash
+   tmux run-shell "OPENCODE_STATE_DETAIL='[error] ProviderError: quota exceeded' OPENCODE_LAST_MESSAGE='' AGENT_NAME='opencode' AGENT_STATE='done' AGENT_SESSION='ai' AGENT_WINDOW='main' AGENT_PANE='<pane-id>' bash ~/.tmux/plugins/tmux-agent-indicator/scripts/notify-email.sh"
+   ```
+4. Verify the captured `[oc-done]` email: the body's first line is `[error] ProviderError: quota exceeded`, followed by a blank line and the rest of the body. A normal (non-error) `done` email has no detail prefix.
