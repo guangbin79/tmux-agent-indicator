@@ -171,6 +171,118 @@ const emit = async (payload, h = hooks) => {
     JSON.stringify(commands.slice(n)));
 }
 
+// T1a-T1i: OPENCODE_STATE_DETAIL wiring. Each case drives its own plugin
+// instance so setState's per-instance lastState dedup starts fresh ("off").
+{
+  const h = await TmuxAgentIndicator({ $, client });
+  const n = commands.length;
+  await h.event({ event: { type: "permission.asked", properties: { sessionID: "s1", permission: "bash", patterns: ["git push", "rm -rf node_modules"] } } });
+  const batch = commands.slice(n);
+  check("T1a permission.asked: detail + title + last message",
+    batch.length === 1
+      && batch[0].includes("OPENCODE_STATE_DETAIL=[bash] git push, rm -rf node_modules")
+      && batch[0].includes("OPENCODE_SESSION_TITLE=T")
+      && batch[0].includes("OPENCODE_LAST_MESSAGE=agent says hi")
+      && batch[0].includes("--state needs-input"),
+    JSON.stringify(batch));
+}
+
+{
+  const h = await TmuxAgentIndicator({ $, client });
+  const n = commands.length;
+  await h.event({
+    event: {
+      type: "question.asked",
+      properties: {
+        sessionID: "s1",
+        questions: [
+          { question: "Deploy?", options: [{ label: "A", description: "x" }, { label: "B", description: "y" }] },
+          { question: "Sure?" },
+        ],
+      },
+    },
+  });
+  const batch = commands.slice(n);
+  const cmd = batch[0] || "";
+  const questionLines = (cmd.match(/\[question\]/g) || []).length;
+  const optionsCount = (cmd.match(/ \(options:/g) || []).length;
+  check("T1b question.asked: one line per question, options only when present",
+    batch.length === 1
+      && questionLines === 2
+      && optionsCount === 1
+      && cmd.includes("[question] Deploy? (options: A, B)")
+      && cmd.includes("[question] Sure?")
+      && cmd.includes("--state needs-input"),
+    JSON.stringify(batch));
+}
+
+{
+  const h = await TmuxAgentIndicator({ $, client });
+  const n = commands.length;
+  await h.event({ event: { type: "session.error", properties: { sessionID: "s1", error: { name: "ApiError", data: { message: "boom" } } } } });
+  const batch = commands.slice(n);
+  check("T1c session.error: done with [error] name: message detail",
+    batch.length === 1
+      && batch[0].includes("--state done")
+      && batch[0].includes("OPENCODE_STATE_DETAIL=[error] ApiError: boom"),
+    JSON.stringify(batch));
+}
+
+{
+  const h = await TmuxAgentIndicator({ $, client });
+  const n = commands.length;
+  await h.event({ event: { type: "session.error", properties: { sessionID: "s1", error: { name: "NameOnly", data: {} } } } });
+  const batch = commands.slice(n);
+  check("T1d error without message: [error] name with no ': ' suffix",
+    batch.length === 1 && /OPENCODE_STATE_DETAIL=\[error\] NameOnly( |$)/.test(batch[0]),
+    JSON.stringify(batch));
+}
+
+{
+  const h = await TmuxAgentIndicator({ $, client });
+  const n = commands.length;
+  await h.event({ event: { type: "session.error", properties: { sessionID: "s1" } } });
+  const batch = commands.slice(n);
+  check("T1e session.error without error field: empty detail",
+    batch.length === 1 && /OPENCODE_STATE_DETAIL=( |$)/.test(batch[0]) && batch[0].includes("--state done"),
+    JSON.stringify(batch));
+}
+
+{
+  const h = await TmuxAgentIndicator({ $, client });
+  const n = commands.length;
+  await h.event({ event: { type: "session.error", properties: { error: { name: "E", data: { message: "m" } } } } });
+  const batch = commands.slice(n);
+  check("T1f session.error without sessionID: detail still forwarded",
+    batch.length === 1
+      && batch[0].includes("--state done")
+      && batch[0].includes("OPENCODE_STATE_DETAIL=[error] E: m"),
+    JSON.stringify(batch));
+}
+
+check("T1g removed context-less hooks",
+  hooks["permission.ask"] === undefined && !("tool.execute.before" in hooks));
+
+{
+  const h = await TmuxAgentIndicator({ $, client });
+  const n = commands.length;
+  await h.event({ event: { type: "permission.asked", properties: { sessionID: "s1", permission: "bash", patterns: [] } } });
+  const batch = commands.slice(n);
+  check("T1h empty patterns: [bash] with no trailing space",
+    batch.length === 1 && /OPENCODE_STATE_DETAIL=\[bash\] b/.test(batch[0]),
+    JSON.stringify(batch));
+}
+
+{
+  const h = await TmuxAgentIndicator({ $, client });
+  const n = commands.length;
+  await h.event({ event: { type: "permission.asked", properties: { sessionID: "s1", permission: "bash", patterns: ["x".repeat(100001)] } } });
+  const batch = commands.slice(n);
+  check("T1i over-cap detail: truncated marker",
+    batch.length === 1 && batch[0].includes("...(truncated)"),
+    JSON.stringify(batch.map((c) => `${c.slice(0, 60)}...len=${c.length}`)));
+}
+
 if (failures.length > 0) {
   console.error(`FAIL: ${failures.length} assertion(s) failed:`);
   for (const f of failures) console.error(`  - ${f}`);

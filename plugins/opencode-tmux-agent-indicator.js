@@ -54,14 +54,45 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
     }
   };
 
-  const setState = async (state, sessionTitle = "", lastMessage = "") => {
+  // Detail builders turn raw event payloads into the OPENCODE_STATE_DETAIL
+  // context line — pure functions, zero API calls, safe on any event shape.
+  const capDetail = (detail) => (detail.length > PLUGIN_MESSAGE_CAP
+    ? `${detail.slice(0, PLUGIN_MESSAGE_CAP)}...(truncated)`
+    : detail);
+
+  const buildPermissionDetail = (properties) => {
+    const permission = properties?.permission;
+    if (typeof permission !== "string") return "";
+    const patterns = Array.isArray(properties?.patterns) ? properties.patterns : [];
+    return capDetail(patterns.length > 0 ? `[${permission}] ${patterns.join(", ")}` : `[${permission}]`);
+  };
+
+  const buildQuestionDetail = (properties) => {
+    const questions = Array.isArray(properties?.questions) ? properties.questions : [];
+    return capDetail(questions
+      .map((q) => {
+        const options = Array.isArray(q?.options) ? q.options : [];
+        const opts = options.length > 0 ? ` (options: ${options.map((o) => o?.label).join(", ")})` : "";
+        return `[question] ${q?.question}${opts}`;
+      })
+      .join("\n"));
+  };
+
+  const buildErrorDetail = (properties) => {
+    const error = properties?.error;
+    if (!error) return "";
+    const msg = typeof error.data?.message === "string" ? error.data.message.trim() : "";
+    return capDetail(msg ? `[error] ${error.name}: ${msg}` : `[error] ${error.name}`);
+  };
+
+  const setState = async (state, sessionTitle = "", lastMessage = "", stateDetail = "") => {
     if (state === lastState) return;
     lastState = state;
     try {
       if (state === "running") {
         await $`bash ${script} --agent opencode --state off`;
       }
-      await $`OPENCODE_SESSION_TITLE=${sessionTitle} OPENCODE_LAST_MESSAGE=${lastMessage} bash ${script} --agent opencode --state ${state}`;
+      await $`OPENCODE_SESSION_TITLE=${sessionTitle} OPENCODE_LAST_MESSAGE=${lastMessage} OPENCODE_STATE_DETAIL=${stateDetail} bash ${script} --agent opencode --state ${state}`;
     } catch {
       // non-fatal: tmux may not be available
     }
@@ -92,12 +123,25 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
 
       if (event.type === "permission.asked") {
         const sid = event.properties?.sessionID;
+        const detail = buildPermissionDetail(event.properties);
         if (sid) {
           const title = await resolveSessionTitle(sid);
           const msg = await resolveLastAssistantMessage(sid);
-          await setState("needs-input", title, msg);
+          await setState("needs-input", title, msg, detail);
         } else {
-          await setState("needs-input");
+          await setState("needs-input", "", "", detail);
+        }
+      }
+
+      if (event.type === "question.asked") {
+        const sid = event.properties?.sessionID;
+        const detail = buildQuestionDetail(event.properties);
+        if (sid) {
+          const title = await resolveSessionTitle(sid);
+          const msg = await resolveLastAssistantMessage(sid);
+          await setState("needs-input", title, msg, detail);
+        } else {
+          await setState("needs-input", "", "", detail);
         }
       }
 
@@ -120,21 +164,14 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
 
       if (event.type === "session.error") {
         idleAt = Date.now();
+        const detail = buildErrorDetail(event.properties);
         if (event.properties?.sessionID) {
           const title = await resolveSessionTitle(event.properties.sessionID);
           const msg = await resolveLastAssistantMessage(event.properties.sessionID);
-          await setState("done", title, msg);
+          await setState("done", title, msg, detail);
         } else {
-          await setState("done");
+          await setState("done", "", "", detail);
         }
-      }
-    },
-    "permission.ask": async () => {
-      await setState("needs-input");
-    },
-    "tool.execute.before": async (input) => {
-      if (input.tool === "question") {
-        await setState("needs-input");
       }
     },
   };
