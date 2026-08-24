@@ -9,15 +9,16 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
 
   let lastState = "off";
   let idleAt = 0;
-  let sessionTitle = "";
-  let lastAssistantMessage = "";
 
+  // Resolvers return the value for the caller to pass through setState —
+  // session context is never stored on the module, so concurrent event
+  // handlers cannot read another session's title/message.
   const resolveSessionTitle = async (sessionID) => {
     try {
       const res = await client.session.get({ path: { id: sessionID } });
-      sessionTitle = res.data?.title || "";
+      return res.data?.title || "";
     } catch {
-      sessionTitle = "";
+      return "";
     }
   };
 
@@ -45,22 +46,22 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
         .map((p) => p.text)
         .join("\n")
         .trim();
-      lastAssistantMessage = text.length > PLUGIN_MESSAGE_CAP
+      return text.length > PLUGIN_MESSAGE_CAP
         ? `${text.slice(0, PLUGIN_MESSAGE_CAP)}...(truncated)`
         : text;
     } catch {
-      lastAssistantMessage = "";
+      return "";
     }
   };
 
-  const setState = async (state) => {
+  const setState = async (state, sessionTitle = "", lastMessage = "") => {
     if (state === lastState) return;
     lastState = state;
     try {
       if (state === "running") {
         await $`bash ${script} --agent opencode --state off`;
       }
-      await $`OPENCODE_SESSION_TITLE=${sessionTitle} OPENCODE_LAST_MESSAGE=${lastAssistantMessage} bash ${script} --agent opencode --state ${state}`;
+      await $`OPENCODE_SESSION_TITLE=${sessionTitle} OPENCODE_LAST_MESSAGE=${lastMessage} bash ${script} --agent opencode --state ${state}`;
     } catch {
       // non-fatal: tmux may not be available
     }
@@ -79,10 +80,12 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
           idleAt = Date.now();
           const sid = event.properties?.sessionID;
           if (sid) {
-            await resolveSessionTitle(sid);
-            await resolveLastAssistantMessage(sid);
+            const title = await resolveSessionTitle(sid);
+            const msg = await resolveLastAssistantMessage(sid);
+            await setState("done", title, msg);
+          } else {
+            await setState("done");
           }
-          await setState("done");
         }
         // "retry" keeps the current running state; nothing to do.
       }
@@ -90,32 +93,40 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
       if (event.type === "permission.asked") {
         const sid = event.properties?.sessionID;
         if (sid) {
-          await resolveSessionTitle(sid);
-          await resolveLastAssistantMessage(sid);
+          const title = await resolveSessionTitle(sid);
+          const msg = await resolveLastAssistantMessage(sid);
+          await setState("needs-input", title, msg);
+        } else {
+          await setState("needs-input");
         }
-        await setState("needs-input");
       }
 
       if (event.type === "permission.replied") {
+        // Guard: don't override done if idle fired recently (race condition)
+        if (Date.now() - idleAt < 2000) return;
         await setState("running");
       }
 
       if (event.type === "session.idle") {
         idleAt = Date.now();
         if (event.properties?.sessionID) {
-          await resolveSessionTitle(event.properties.sessionID);
-          await resolveLastAssistantMessage(event.properties.sessionID);
+          const title = await resolveSessionTitle(event.properties.sessionID);
+          const msg = await resolveLastAssistantMessage(event.properties.sessionID);
+          await setState("done", title, msg);
+        } else {
+          await setState("done");
         }
-        await setState("done");
       }
 
       if (event.type === "session.error") {
         idleAt = Date.now();
         if (event.properties?.sessionID) {
-          await resolveSessionTitle(event.properties.sessionID);
-          await resolveLastAssistantMessage(event.properties.sessionID);
+          const title = await resolveSessionTitle(event.properties.sessionID);
+          const msg = await resolveLastAssistantMessage(event.properties.sessionID);
+          await setState("done", title, msg);
+        } else {
+          await setState("done");
         }
-        await setState("done");
       }
     },
     "permission.ask": async () => {

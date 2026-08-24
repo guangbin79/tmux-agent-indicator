@@ -34,10 +34,11 @@ const check = (name, ok, detail = "") => {
 
 const hooks = await TmuxAgentIndicator({ $, client });
 
-// Returns an error string if hooks.event threw, else null.
-const emit = async (payload) => {
+// Returns an error string if hooks.event threw, else null. Second arg lets a
+// test drive a separate plugin instance (default: the shared hooks above).
+const emit = async (payload, h = hooks) => {
   try {
-    await hooks.event(payload);
+    await h.event(payload);
     return null;
   } catch (err) {
     return `threw: ${err && err.message}`;
@@ -73,6 +74,8 @@ const emit = async (payload) => {
 }
 
 // 3. permission.replied -> back to running (off then running)
+// (Runs BEFORE any idle event: idleAt is still 0, so the late-reply guard
+// added for follow-up #2 does not trip here.)
 {
   const n = commands.length;
   const err = await emit({ event: { type: "permission.replied", properties: { sessionID: "s1" } } });
@@ -114,6 +117,57 @@ const emit = async (payload) => {
   const err = await emit({ event: { type: "session.status", properties: {} } });
   check("malformed session.status: no throw (optional chaining)", err === null, err || "");
   check("malformed session.status: no command", commands.length === n,
+    JSON.stringify(commands.slice(n)));
+}
+
+// 7. cross-session race: concurrent handlers must each carry their own session's
+// title/message into their own command — never shared module state.
+//
+// Timing rationale: sA's messages stub is slow (30ms) while its get is instant.
+// That is the interleaving that breaks module-level state on the OLD code:
+// handler A writes its title, parks on the slow messages call, handler B fully
+// overwrites the module vars and emits, then A resumes, writes its message, and
+// A's setState reads B's title. (If A's get were also slow, A would finish
+// entirely after B and read its own values — the race would not reproduce.)
+{
+  const raceClient = {
+    session: {
+      get: async ({ path }) => ({ data: { title: `title-${path.id}` } }),
+      messages: async ({ path }) => {
+        if (path.id === "sA") await new Promise((r) => setTimeout(r, 30));
+        return {
+          data: [
+            { info: { role: "assistant" }, parts: [{ type: "text", text: `msg-${path.id}` }] },
+          ],
+        };
+      },
+    },
+  };
+  const raceHooks = await TmuxAgentIndicator({ $, client: raceClient });
+  const n = commands.length;
+  const p1 = emit({ event: { type: "session.status", properties: { sessionID: "sA", status: { type: "idle" } } } }, raceHooks);
+  const p2 = emit({ event: { type: "permission.asked", properties: { sessionID: "sB" } } }, raceHooks);
+  await Promise.all([p1, p2]);
+  const batch = commands.slice(n);
+  const doneCmd = batch.find((c) => c.includes("--state done"));
+  const askCmd = batch.find((c) => c.includes("--state needs-input"));
+  check("interleave: both commands emitted", !!doneCmd && !!askCmd, JSON.stringify(batch));
+  check("interleave: sA done carries sA title+message",
+    !!doneCmd && doneCmd.includes("OPENCODE_SESSION_TITLE=title-sA") && doneCmd.includes("OPENCODE_LAST_MESSAGE=msg-sA"),
+    JSON.stringify(batch));
+  check("interleave: sB needs-input carries sB title+message",
+    !!askCmd && askCmd.includes("OPENCODE_SESSION_TITLE=title-sB") && askCmd.includes("OPENCODE_LAST_MESSAGE=msg-sB"),
+    JSON.stringify(batch));
+}
+
+// 8. late permission.replied within 2s of idle must NOT flip done back to running.
+// Uses the shared hooks: tests 4/5 fired idle milliseconds ago, so idleAt is
+// fresh and inside the 2000ms window — deterministic.
+{
+  const n = commands.length;
+  const err = await emit({ event: { type: "permission.replied", properties: { sessionID: "s1" } } });
+  check("late permission.replied: no throw", err === null, err || "");
+  check("late permission.replied within 2s of idle: no new command", commands.length === n,
     JSON.stringify(commands.slice(n)));
 }
 
