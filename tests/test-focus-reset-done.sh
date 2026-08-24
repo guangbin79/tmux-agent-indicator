@@ -10,7 +10,11 @@ trap cleanup_test_server EXIT
 setup_test_server "focus-reset-done"
 
 run_state done
+sleep 0.5
+done_style="$(get_window_option "$WIN" "window-status-style")"
+assert_non_empty "$done_style" "done should style the active window title (deferred reset keeps it until focus)"
 tmux_cmd run-shell "$ROOT_DIR/scripts/pane-focus-in.sh \"$PANE\" \"$WIN\""
+sleep 0.3
 
 status_style_after="$(get_window_option "$WIN" "window-status-style")"
 current_style_after="$(get_window_option "$WIN" "window-status-current-style")"

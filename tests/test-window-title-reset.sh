@@ -9,8 +9,9 @@ trap cleanup_test_server EXIT
 
 setup_test_server "window-title-reset"
 create_other_window
-# Source window must be non-active when state is triggered, otherwise
-# apply_window_title_style is intentionally skipped (active window gets no hint).
+# Keep the source window non-active while the state is triggered so the
+# away/return distinction below exercises the focus-driven reset path
+# (all states now style the active window too, so this is isolation, not skip).
 tmux_cmd select-window -t ai:other
 
 run_state needs-input

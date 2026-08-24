@@ -159,7 +159,7 @@ set -g @agent-indicator-animation-enabled 'on'
 
 Note: the animation refreshes the status bar every tick (`@agent-indicator-animation-speed`, default 300ms). Keep it off on minimal setups or slow terminals.
 
-Note: unlike needs-input/done, the running state also styles the currently focused window's title — the window you are in signals that an agent is working.
+Note: all states (running, needs-input, done) style the currently focused window's title — the window you are in always signals agent activity; done styling clears on the next focus change (deferred reset).
 <details>
 <summary>Full configuration reference</summary>
 

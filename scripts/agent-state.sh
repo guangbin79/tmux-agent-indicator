@@ -375,7 +375,6 @@ esac
 
 pane_id=$(resolve_target_pane "$agent")
 window_id=$(tmux display-message -p -t "$pane_id" '#{window_id}')
-active_window_id=$(tmux display-message -p '#{window_id}')
 active_pane_id=$(tmux display-message -p '#{pane_id}')
 
 # Clear session-dots seen marker so new attention is visible
@@ -446,7 +445,8 @@ case "$state" in
             restore_active_border_style "$window_id"
         fi
 
-        # Intentional: running styles apply to the active window too (unlike needs-input/done) so the current window signals activity.
+        # Intentional: all states style the active window's title so the window you are in signals agent activity.
+        apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg"
         apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg"
         start_animation
         notify_state_change "$agent" "$state" "$pane_id"
@@ -487,9 +487,7 @@ case "$state" in
             restore_active_border_style "$window_id"
         fi
 
-        if [ "$window_id" != "$active_window_id" ]; then
-            apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg"
-        fi
+        apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg"
         notify_state_change "$agent" "$state" "$pane_id"
         ;;
     done)
@@ -522,11 +520,7 @@ case "$state" in
             fi
         fi
 
-        if [ "$window_id" != "$active_window_id" ]; then
-            apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg" "done"
-        else
-            clear_window_title_style "$window_id"
-        fi
+        apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg" "done"
         notify_state_change "$agent" "$state" "$pane_id"
 
         if is_enabled "$reset_on_focus"; then
