@@ -447,7 +447,6 @@ case "$state" in
 
         # Intentional: all states style the active window's title so the window you are in signals agent activity.
         apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg"
-        apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg"
         start_animation
         notify_state_change "$agent" "$state" "$pane_id"
         ;;
