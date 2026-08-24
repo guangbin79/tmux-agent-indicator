@@ -283,6 +283,19 @@ check("T1g removed context-less hooks",
     JSON.stringify(batch.map((c) => `${c.slice(0, 60)}...len=${c.length}`)));
 }
 
+{
+  const h = await TmuxAgentIndicator({ $, client });
+  const n = commands.length;
+  await h.event({ event: { type: "session.error", properties: { sessionID: "s1", error: "quota exceeded" } } });
+  const batch = commands.slice(n);
+  check("T1j string error payload: [error] <string>, not undefined",
+    batch.length === 1
+      && /OPENCODE_STATE_DETAIL=\[error\] quota exceeded( |$)/.test(batch[0])
+      && !batch[0].includes("undefined")
+      && batch[0].includes("--state done"),
+    JSON.stringify(batch));
+}
+
 if (failures.length > 0) {
   console.error(`FAIL: ${failures.length} assertion(s) failed:`);
   for (const f of failures) console.error(`  - ${f}`);

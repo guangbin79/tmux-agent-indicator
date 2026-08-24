@@ -81,6 +81,7 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
   const buildErrorDetail = (properties) => {
     const error = properties?.error;
     if (!error) return "";
+    if (typeof error === "string") return capDetail(`[error] ${error}`);
     const msg = typeof error.data?.message === "string" ? error.data.message.trim() : "";
     return capDetail(msg ? `[error] ${error.name}: ${msg}` : `[error] ${error.name}`);
   };
