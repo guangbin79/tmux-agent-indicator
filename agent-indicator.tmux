@@ -44,6 +44,7 @@ register_focus_hooks() {
     register_hook_once "pane-focus-in" "$hook_command"
     register_hook_once "after-select-window" "$hook_command"
     register_hook_once "after-select-pane" "$hook_command"
+    register_hook_once "client-session-changed" "$hook_command" "pane-focus-in.sh"
 }
 
 main() {
@@ -56,7 +57,7 @@ main() {
     update_tmux_option "@minimal-tmux-status-left-extra"
     register_focus_hooks
     local session_script="$CURRENT_DIR/scripts/session-changed.sh"
-    register_hook_once "client-session-changed" "run-shell \"$session_script\""
+    register_hook_once "client-session-changed" "run-shell \"$session_script\"" "session-changed.sh"
 }
 
 main
