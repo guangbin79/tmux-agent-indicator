@@ -12,9 +12,11 @@ setup_test_server "notif-env"
 CAPTURE_UNSET="/tmp/tmux-agent-indicator-${SOCK}-notif-env-unset-${RANDOM}.txt"
 CAPTURE_SET="/tmp/tmux-agent-indicator-${SOCK}-notif-env-set-${RANDOM}.txt"
 CAPTURE_DISPLAY_OFF="/tmp/tmux-agent-indicator-${SOCK}-notif-env-display-off-${RANDOM}.txt"
+CAPTURE_DETAIL="/tmp/tmux-agent-indicator-${SOCK}-notif-env-detail-${RANDOM}.txt"
 register_tmp_file "$CAPTURE_UNSET"
 register_tmp_file "$CAPTURE_SET"
 register_tmp_file "$CAPTURE_DISPLAY_OFF"
+register_tmp_file "$CAPTURE_DETAIL"
 
 tmux_cmd set -g @agent-indicator-notification-enabled 'on'
 tmux_cmd set -g @agent-indicator-notification-states 'needs-input,done'
@@ -89,8 +91,39 @@ if ! grep -q '^OPENCODE_LAST_MESSAGE=$' "$CAPTURE_DISPLAY_OFF"; then
     fail "OPENCODE_LAST_MESSAGE not forwarded with notification-display off"
 fi
 
+# ---------------------------------------------------------------------------
+# Scenario 4: OPENCODE_STATE_DETAIL NOT available to agent-state.sh
+# Without the explicit forwarding line in notify_state_change(), the var
+# never reaches the notification command; it must appear as empty instead.
+# ---------------------------------------------------------------------------
+tmux_cmd set -g @agent-indicator-notification-command "env > '$CAPTURE_DETAIL'"
+tmux_cmd run-shell \
+    "TMUX_PANE=$PANE \"$ROOT_DIR/scripts/agent-state.sh\" --agent opencode --state needs-input"
+
+sleep 0.3
+
+if ! grep -q '^OPENCODE_STATE_DETAIL=$' "$CAPTURE_DETAIL"; then
+    fail "OPENCODE_STATE_DETAIL not forwarded when unset"
+fi
+
+# ---------------------------------------------------------------------------
+# Scenario 5: OPENCODE_STATE_DETAIL set in the run-shell prefix. The value
+# contains spaces and a glob character class, so it must be single-quoted
+# inside the run-shell string: sh -c then parses the whole thing as one
+# assignment instead of splitting 'git push' into a command word.
+# ---------------------------------------------------------------------------
+tmux_cmd run-shell \
+    "OPENCODE_STATE_DETAIL='[bash] git push' TMUX_PANE=$PANE \"$ROOT_DIR/scripts/agent-state.sh\" --agent opencode --state done"
+
+sleep 0.3
+
+if ! grep -q '^OPENCODE_STATE_DETAIL=\[bash\] git push$' "$CAPTURE_DETAIL"; then
+    fail "OPENCODE_STATE_DETAIL='[bash] git push' not propagated to notification-command subshell"
+fi
+
 # Restore defaults for later consumers of this server
 tmux_cmd set -g @agent-indicator-notification-display 'on'
 
 pass "notification-command fires with notification-display off (email chain intact)"
 pass "notification-command receives OPENCODE_LAST_MESSAGE and standard env vars"
+pass "notification-command receives OPENCODE_STATE_DETAIL (unset -> empty, set -> verbatim)"

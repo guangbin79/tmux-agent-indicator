@@ -335,6 +335,7 @@ notify_state_change() {
         AGENT_SESSION="$session_name" AGENT_WINDOW="$window_name" \
         AGENT_PANE="$pane_id" \
         OPENCODE_LAST_MESSAGE="${OPENCODE_LAST_MESSAGE:-}" \
+        OPENCODE_STATE_DETAIL="${OPENCODE_STATE_DETAIL:-}" \
         bash -c "$ext_cmd" 2>/dev/null &
     fi
 }
