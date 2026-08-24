@@ -161,6 +161,7 @@ if [ -n "$PANE_TTY" ]; then
         proc=$(trim "$proc")
         [ -z "$proc" ] && continue
         # Check if process is running on this TTY
+        # shellcheck disable=SC2009  # tty-scoped word match is intentional
         if ps -t "$(basename "$PANE_TTY")" -o command= 2>/dev/null | grep -qw "$proc"; then
             icon_for_agent "$proc" "$ICONS"
             exit 0
@@ -176,6 +177,7 @@ while IFS=' ' read -r other_pane other_tty other_active; do
     for proc in "${PROC_ARRAY[@]}"; do
         proc=$(trim "$proc")
         [ -z "$proc" ] && continue
+        # shellcheck disable=SC2009  # tty-scoped word match is intentional
         if ps -t "$(basename "$other_tty")" -o command= 2>/dev/null | grep -qw "$proc"; then
             icon_for_agent "$proc" "$ICONS"
             exit 0
