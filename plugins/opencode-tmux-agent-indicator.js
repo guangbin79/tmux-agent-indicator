@@ -31,7 +31,7 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
     try {
       const res = await client.session.messages({
         path: { id: sessionID },
-        query: { limit: 20 },
+        query: { limit: 50 },
       });
       const messages = Array.isArray(res?.data) ? res.data : [];
       // Skip assistant messages that have no usable text part (e.g. tool-call-only turns).
@@ -68,16 +68,36 @@ export const TmuxAgentIndicator = async ({ $, client }) => {
 
   return {
     event: async ({ event }) => {
-      if (event.type === "session.status"
-          && event.properties.status.type === "busy") {
-        // Guard: don't override done/error if idle fired recently (race condition)
-        if (Date.now() - idleAt < 2000) return;
-        await setState("running");
+      if (event.type === "session.status") {
+        const statusType = event.properties?.status?.type;
+        if (statusType === "busy") {
+          // Guard: don't override done/error if idle fired recently (race condition)
+          if (Date.now() - idleAt < 2000) return;
+          await setState("running");
+        }
+        if (statusType === "idle") {
+          idleAt = Date.now();
+          const sid = event.properties?.sessionID;
+          if (sid) {
+            await resolveSessionTitle(sid);
+            await resolveLastAssistantMessage(sid);
+          }
+          await setState("done");
+        }
+        // "retry" keeps the current running state; nothing to do.
       }
 
-      if (event.type === "permission.updated"
-          || event.type === "permission.asked") {
+      if (event.type === "permission.asked") {
+        const sid = event.properties?.sessionID;
+        if (sid) {
+          await resolveSessionTitle(sid);
+          await resolveLastAssistantMessage(sid);
+        }
         await setState("needs-input");
+      }
+
+      if (event.type === "permission.replied") {
+        await setState("running");
       }
 
       if (event.type === "session.idle") {
