@@ -139,6 +139,13 @@ if [ "$INSTALL_OPENCODE" = true ] && [ "$UNINSTALL_OPENCODE" = false ]; then
     if ! command -v opencode >/dev/null 2>&1 && [ ! -d "$OPENCODE_CFG_DIR" ]; then
         INSTALL_OPENCODE=false
         echo "OpenCode not detected, skipping plugin setup"
+    elif command -v opencode >/dev/null 2>&1; then
+        # The plugin uses the OpenCode v2 plugin API; it does not run on v1.
+        OPENCODE_MAJOR="$(opencode --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)"
+        if [ -n "$OPENCODE_MAJOR" ] && [ "$OPENCODE_MAJOR" -lt 2 ] 2>/dev/null; then
+            INSTALL_OPENCODE=false
+            echo "OpenCode v1 detected; the plugin requires OpenCode v2, skipping plugin setup"
+        fi
     fi
 fi
 
@@ -302,7 +309,7 @@ OPENCODE_PLUGIN_NAME="opencode-tmux-agent-indicator.js"
 
 if [ "$INSTALL_OPENCODE" = true ]; then
     OPENCODE_PLUGINS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/plugins"
-    echo "OpenCode detected"
+    echo "OpenCode v2 detected"
     echo "  Plugin -> $OPENCODE_PLUGINS_DIR/$OPENCODE_PLUGIN_NAME"
     mkdir -p "$OPENCODE_PLUGINS_DIR"
     cp "$TARGET_DIR/plugins/$OPENCODE_PLUGIN_NAME" "$OPENCODE_PLUGINS_DIR/$OPENCODE_PLUGIN_NAME"

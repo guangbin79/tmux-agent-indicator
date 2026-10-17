@@ -203,10 +203,10 @@ Verifies email bodies for `done` and `needs-input` events: OpenCode event detail
 
 ### Scenario 2: `needs-input` email behavior
 
-1. In an OpenCode session, trigger a permission ask (e.g., agent requests tool approval).
+1. In an OpenCode (v2) session, trigger a permission ask (e.g., agent requests tool approval) or a form question.
 2. Verify the received email:
    - **Subject:** starts with `[oc-need_input]`
-   - **Body:** first line is the event detail (e.g. `[bash] git push` for a permission ask, or `[question] <full question text>` for a question), followed by a blank line and the assistant message captured at the most recent `session.idle`/`session.error`.
+   - **Body:** first line is the event detail (e.g. `[bash] git push` for a permission ask — plus the server-provided ask message on the next line when present — or `[question] <field label>` per field for a form question), followed by a blank line and the assistant message captured at the most recent `session.idle`/`session.error`.
    - If either part is missing, the body is whichever part exists; if neither exists, it falls back to the standard one-line summary (`Session <name>: agent opencode needs input at <timestamp>`).
 
 ### Scenario 3: Fallback for non-OpenCode agents

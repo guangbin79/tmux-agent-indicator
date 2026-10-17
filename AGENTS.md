@@ -9,7 +9,7 @@ This repository is a tmux plugin written in Bash.
 - `scripts/indicator.sh`: status segment renderer (icons + process/state detection).
 - `hooks/claude-hooks.json`: Claude hook template.
 - `adapters/codex-notify.sh`: Codex notify adapter mapping events to states.
-- `plugins/opencode-tmux-agent-indicator.js`: OpenCode plugin wiring session/permission events to agent-state.sh.
+- `plugins/opencode-tmux-agent-indicator.js`: OpenCode v2 plugin (V2 plugin API: `Plugin.define` + `ctx.event.subscribe`) wiring session/permission/form events to agent-state.sh.
 - `tests/`: isolated tmux-socket test suite (`tests/run-all.sh`, plus `tests/test-plugin-events.mjs` node stub-driver).
 - `docs/`: testing docs (`docs/TESTING.md`) and specs/assets.
 
