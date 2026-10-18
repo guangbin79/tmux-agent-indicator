@@ -208,6 +208,14 @@ export const setup = (ctx) => {
         break;
       }
 
+      // 2026-10-18 事件总线 probe（2.0.32）：session.idle/status 从不发射，
+      // 回合完成真信号是 session.execution.succeeded（载荷 data.sessionID）。
+      case "session.execution.succeeded": {
+        idleAt = Date.now();
+        await reportDone(data?.sessionID);
+        break;
+      }
+
       case "session.error": {
         idleAt = Date.now();
         await reportDone(data?.sessionID, buildErrorDetail(data));
