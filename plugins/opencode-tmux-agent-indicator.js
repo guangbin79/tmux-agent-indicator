@@ -41,8 +41,8 @@ export const setup = (ctx) => {
 
   let lastState = "off";
   let idleAt = 0;
-  const instructionsAt = new Map(); // sessionID -> 最近一次用户消息 ts（stale succeeded 判别）
-  const STALE_WINDOW_MS = 30_000;
+  const startedCount = new Map(); // sessionID -> execution.started 计数（在途执行判别）
+  const succeededCount = new Map(); // sessionID -> execution.succeeded 计数
 
   // Run agent-state.sh via execFile with an explicit args array and env
   // overlay — no shell interpolation, so titles and messages cannot break
@@ -216,7 +216,9 @@ export const setup = (ctx) => {
       // session.execution.started（与 succeeded 对称的执行开始）同样驱动 running。
       case "session.execution.started":
       case "session.instructions.updated": {
-        instructionsAt.set(data?.sessionID, Date.now());
+        if (data?.sessionID) {
+          startedCount.set(data.sessionID, (startedCount.get(data.sessionID) || 0) + 1);
+        }
         if (Date.now() - idleAt < IDLE_GUARD_MS) return;
         await setState("running");
         break;
@@ -235,12 +237,15 @@ export const setup = (ctx) => {
       // 30 秒新指令窗口内的 succeeded 视为陈旧，忽略（防红蓝误翻；真实完成
       // 会在下个回合末自愈）。
       case "session.execution.succeeded": {
-        const lastInstr = instructionsAt.get(data?.sessionID) || 0;
-        if (Date.now() - lastInstr < STALE_WINDOW_MS) {
-          dbg(`skip stale succeeded (within ${STALE_WINDOW_MS / 1000}s of instructions) sessionID=${data?.sessionID ?? "-"}`);
+        const sid = data?.sessionID;
+        const sDone = (succeededCount.get(sid) || 0) + 1;
+        succeededCount.set(sid, sDone);
+        const sStarted = startedCount.get(sid) || 0;
+        if (sDone < sStarted) {
+          dbg(`skip stale succeeded (${sDone}/${sStarted}) sessionID=${sid ?? "-"}`);
           break;
         }
-        dbg(`HIT execution.succeeded sessionID=${data?.sessionID ?? "-"}`);
+        dbg(`HIT execution.succeeded sessionID=${sid ?? "-"}`);
         idleAt = Date.now();
         await reportDone(data?.sessionID);
         break;
