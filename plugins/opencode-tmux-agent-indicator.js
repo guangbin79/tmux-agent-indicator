@@ -214,11 +214,19 @@ export const setup = (ctx) => {
       // 2026-10-18 probe：session.status 全程零发射（死事件），用户消息入账的
       // 真信号是 session.instructions.updated——回合开始（running 蓝）改由它驱动。
       // session.execution.started（与 succeeded 对称的执行开始）同样驱动 running。
-      case "session.execution.started":
-      case "session.instructions.updated": {
+      // 2026-10-18 probe：session.status 全程零发射（死事件），用户消息入账的
+      // 真信号是 session.instructions.updated——回合开始（running 蓝）改由它驱动。
+      // session.execution.started（与 succeeded 对称的执行开始）同样驱动 running。
+      // 计数只认 execution.started（instructions 与之并存，双计会毒化配对判据）。
+      case "session.execution.started": {
         if (data?.sessionID) {
           startedCount.set(data.sessionID, (startedCount.get(data.sessionID) || 0) + 1);
         }
+        if (Date.now() - idleAt < IDLE_GUARD_MS) return;
+        await setState("running");
+        break;
+      }
+      case "session.instructions.updated": {
         if (Date.now() - idleAt < IDLE_GUARD_MS) return;
         await setState("running");
         break;
