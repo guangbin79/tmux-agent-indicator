@@ -41,6 +41,8 @@ export const setup = (ctx) => {
 
   let lastState = "off";
   let idleAt = 0;
+  const instructionsAt = new Map(); // sessionID -> 最近一次用户消息 ts（stale succeeded 判别）
+  const STALE_WINDOW_MS = 30_000;
 
   // Run agent-state.sh via execFile with an explicit args array and env
   // overlay — no shell interpolation, so titles and messages cannot break
@@ -210,6 +212,7 @@ export const setup = (ctx) => {
       // 2026-10-18 probe：session.status 全程零发射（死事件），用户消息入账的
       // 真信号是 session.instructions.updated——回合开始（running 蓝）改由它驱动。
       case "session.instructions.updated": {
+        instructionsAt.set(data?.sessionID, Date.now());
         if (Date.now() - idleAt < IDLE_GUARD_MS) return;
         await setState("running");
         break;
@@ -222,9 +225,17 @@ export const setup = (ctx) => {
         break;
       }
 
-      // 2026-10-18 事件总线 probe（2.0.32）：session.idle/status 从不发射，
-      // 回合完成真信号是 session.execution.succeeded（载荷 data.sessionID）。
+      // 2026-10-18 probe：session.idle/status 从不发射，回合完成真信号是
+      // session.execution.succeeded。但它可能是上一执行的迟到回执（用户在响应
+      // 流式输出期间发出新消息时，succeeded 晚于新 instructions 到达）——
+      // 30 秒新指令窗口内的 succeeded 视为陈旧，忽略（防红蓝误翻；真实完成
+      // 会在下个回合末自愈）。
       case "session.execution.succeeded": {
+        const lastInstr = instructionsAt.get(data?.sessionID) || 0;
+        if (Date.now() - lastInstr < STALE_WINDOW_MS) {
+          dbg(`skip stale succeeded (within ${STALE_WINDOW_MS / 1000}s of instructions) sessionID=${data?.sessionID ?? "-"}`);
+          break;
+        }
         dbg(`HIT execution.succeeded sessionID=${data?.sessionID ?? "-"}`);
         idleAt = Date.now();
         await reportDone(data?.sessionID);
