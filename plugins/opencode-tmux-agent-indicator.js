@@ -261,7 +261,10 @@ export const setup = (ctx) => {
   return () => controller.abort();
 };
 
-export default Plugin.define({
+// 2026-10-18 实证：本运行时（2.0.32）已验证可用的导出形态是 plain-object
+// { id, setup }（review-loop-trigger 同款，注入全链 live 验证）；Plugin.define
+// 包裹形态下事件订阅静默失效（done/running 均不触发）。
+export default {
   id: PLUGIN_ID,
   setup,
-});
+};
