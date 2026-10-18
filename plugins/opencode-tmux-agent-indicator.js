@@ -207,6 +207,14 @@ export const setup = (ctx) => {
         break;
       }
 
+      // 2026-10-18 probe：session.status 全程零发射（死事件），用户消息入账的
+      // 真信号是 session.instructions.updated——回合开始（running 蓝）改由它驱动。
+      case "session.instructions.updated": {
+        if (Date.now() - idleAt < IDLE_GUARD_MS) return;
+        await setState("running");
+        break;
+      }
+
       // session.idle fires alongside status idle; setState dedupes.
       case "session.idle": {
         idleAt = Date.now();
@@ -261,6 +269,7 @@ export const setup = (ctx) => {
       }
     } catch (error) {
       if (controller.signal.aborted) return;
+      dbg(`STREAM FAILED: ${error && error.message ? error.message : error}`);
       console.error("[tmux-agent-indicator] event stream failed:", error);
     }
   })();
