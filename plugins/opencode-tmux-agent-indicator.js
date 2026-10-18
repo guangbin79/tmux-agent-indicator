@@ -211,6 +211,10 @@ export const setup = (ctx) => {
 
       // 2026-10-18 probe：session.status 全程零发射（死事件），用户消息入账的
       // 真信号是 session.instructions.updated——回合开始（running 蓝）改由它驱动。
+      // 2026-10-18 probe：session.status 全程零发射（死事件），用户消息入账的
+      // 真信号是 session.instructions.updated——回合开始（running 蓝）改由它驱动。
+      // session.execution.started（与 succeeded 对称的执行开始）同样驱动 running。
+      case "session.execution.started":
       case "session.instructions.updated": {
         instructionsAt.set(data?.sessionID, Date.now());
         if (Date.now() - idleAt < IDLE_GUARD_MS) return;
