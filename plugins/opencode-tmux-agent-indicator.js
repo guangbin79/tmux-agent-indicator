@@ -6,6 +6,11 @@
 // pane visuals.
 
 import { execFile } from "node:child_process";
+import fs from "node:fs";
+
+// 2026-10-18 诊断仪表：boot/事件流/完成命中三点落盘（排障后随上游移除）
+const DBG = "/tmp/opencode/tmux-plugin-debug.log";
+const dbg = (s) => { try { fs.appendFileSync(DBG, `${new Date().toISOString()} ${s}\n`); } catch {} };
 
 // Resolve the V2 plugin helper when running inside OpenCode; fall back to an
 // identity shim so the module also loads under plain Node (tests, syntax
@@ -29,6 +34,7 @@ const IDLE_GUARD_MS = 2000;
 // Event handler body. Exported for the stub-driver test; the default export
 // below is what the OpenCode V2 loader consumes.
 export const setup = (ctx) => {
+  dbg(`boot: has event.subscribe=${typeof ctx?.event?.subscribe === "function"} has session.get=${typeof ctx?.session?.get === "function"}`);
   const dir = process.env.TMUX_AGENT_INDICATOR_DIR
     || `${process.env.HOME}/.tmux/plugins/tmux-agent-indicator`;
   const script = `${dir}/scripts/agent-state.sh`;
@@ -211,6 +217,7 @@ export const setup = (ctx) => {
       // 2026-10-18 事件总线 probe（2.0.32）：session.idle/status 从不发射，
       // 回合完成真信号是 session.execution.succeeded（载荷 data.sessionID）。
       case "session.execution.succeeded": {
+        dbg(`HIT execution.succeeded sessionID=${data?.sessionID ?? "-"}`);
         idleAt = Date.now();
         await reportDone(data?.sessionID);
         break;
@@ -249,6 +256,7 @@ export const setup = (ctx) => {
   void (async () => {
     try {
       for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+        dbg(`event: ${event?.type ?? "?"} sessionID=${event?.data?.sessionID ?? "-"}`);
         await handleEvent(event);
       }
     } catch (error) {

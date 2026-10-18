@@ -425,18 +425,16 @@ case "$state" in
         tmux_set_env "$agent_key" "$agent"
         tmux_set_env "TMUX_AGENT_ACTIVE_PANE_${agent}" "$pane_id"
 
-        if [ "$pane_id" != "$active_pane_id" ]; then
-            if is_enabled "$background_enabled"; then
-                if [ -z "$state_bg" ]; then
-                    :
-                elif [ "$state_bg" = "default" ]; then
-                    reset_pane_style "$pane_id"
-                else
-                    apply_pane_style "$pane_id" "$state_bg"
-                fi
-            else
+        if is_enabled "$background_enabled"; then
+            if [ -z "$state_bg" ]; then
+                :
+            elif [ "$state_bg" = "default" ]; then
                 reset_pane_style "$pane_id"
+            else
+                apply_pane_style "$pane_id" "$state_bg"
             fi
+        else
+            reset_pane_style "$pane_id"
         fi
 
         if is_enabled "$border_enabled"; then
@@ -466,18 +464,16 @@ case "$state" in
         tmux_set_env "$agent_key" "$agent"
         tmux_set_env "TMUX_AGENT_ACTIVE_PANE_${agent}" "$pane_id"
 
-        if [ "$pane_id" != "$active_pane_id" ]; then
-            if is_enabled "$background_enabled"; then
-                if [ -z "$state_bg" ]; then
-                    :
-                elif [ "$state_bg" = "default" ]; then
-                    reset_pane_style "$pane_id"
-                else
-                    apply_pane_style "$pane_id" "$state_bg"
-                fi
-            else
+        if is_enabled "$background_enabled"; then
+            if [ -z "$state_bg" ]; then
+                :
+            elif [ "$state_bg" = "default" ]; then
                 reset_pane_style "$pane_id"
+            else
+                apply_pane_style "$pane_id" "$state_bg"
             fi
+        else
+            reset_pane_style "$pane_id"
         fi
 
         if is_enabled "$border_enabled"; then
@@ -503,15 +499,13 @@ case "$state" in
         tmux_set_env "$done_window_key" "$window_id"
         tmux_set_env "TMUX_AGENT_ACTIVE_PANE_${agent}" "$pane_id"
 
-        if [ "$pane_id" != "$active_pane_id" ]; then
-            if is_enabled "$background_enabled"; then
-                if [ -z "$state_bg" ]; then
-                    :
-                elif [ "$state_bg" = "default" ]; then
-                    reset_pane_style "$pane_id"
-                else
-                    apply_pane_style "$pane_id" "$state_bg"
-                fi
+        if is_enabled "$background_enabled"; then
+            if [ -z "$state_bg" ]; then
+                :
+            elif [ "$state_bg" = "default" ]; then
+                reset_pane_style "$pane_id"
+            else
+                apply_pane_style "$pane_id" "$state_bg"
             fi
         fi
 
