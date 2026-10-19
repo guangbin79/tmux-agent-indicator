@@ -250,19 +250,13 @@ export const setup = (ctx) => {
         if (data?.sessionID) {
           // 不变量：至多一个在途执行——被打断执行的孤儿计数在此自愈
           startedCount.set(data.sessionID, (succeededCount.get(data.sessionID) || 0) + 1);
-          const lastIdle = idleAtBySession.get(data.sessionID) || 0;
-          if (Date.now() - lastIdle < IDLE_GUARD_MS) return;
+          // 新回合开始的真信号不设 IDLE_GUARD（迟复误翻防护只属 replied 分支）
           await setState("running", { sessionID: data.sessionID });
         }
         break;
       }
       case "session.instructions.updated": {
-        const sid = data?.sessionID || null;
-        // 新回合开始＝旧失衡作废：孤儿/迟到计数全部对齐（sync 后 started 再自增）
-        if (sid) startedCount.set(sid, succeededCount.get(sid) || 0);
-        const lastIdle = sid ? (idleAtBySession.get(sid) || 0) : 0;
-        if (Date.now() - lastIdle < IDLE_GUARD_MS) return;
-        await setState("running", { sessionID: sid });
+        await setState("running", { sessionID: data?.sessionID || null });
         break;
       }
 
