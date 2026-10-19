@@ -33,6 +33,7 @@ const DBG_LOG = "/tmp/opencode/tmux-plugin-debug.log";
 const dbg = (msg) => { try { fs.appendFileSync(DBG_LOG, `${new Date().toISOString()} ${msg}\n`); } catch {} };
 
 export const setup = (ctx) => {
+  dbg(`boot: subscribe=${typeof ctx?.event?.subscribe === "function"}`);
   const dir = process.env.TMUX_AGENT_INDICATOR_DIR
     || `${process.env.HOME}/.tmux/plugins/tmux-agent-indicator`;
   const script = `${dir}/scripts/agent-state.sh`;
@@ -247,7 +248,9 @@ export const setup = (ctx) => {
     return capDetail(message ? `[error] ${name}: ${message}` : `[error] ${name}`);
   };
 
+  const WATCHED = new Set(["session.instructions.updated", "session.execution.started", "session.execution.succeeded", "session.viewed", "session.error", "permission.asked", "permission.replied", "form.created", "form.replied", "form.cancelled"]);
   const handleEvent = async (event) => {
+    if (WATCHED.has(event?.type)) dbg(`evt ${event.type} sid=${String(event?.data?.sessionID ?? "-").slice(0, 12)}`);
     const data = event?.data;
     switch (event?.type) {
       // 2026-10-18 probe：session.status 全程零发射（死事件，V1 遗留），已移除。
