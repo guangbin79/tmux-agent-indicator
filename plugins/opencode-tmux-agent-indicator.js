@@ -308,30 +308,39 @@ export const setup = (ctx) => {
     }
   };
 
-  const controller = new AbortController();
-  // 断流自愈：事件迭代器可能静默完结（服务端关闭/热重载竞态）——外层循环
-  // 重订阅（review-loop 同款模式），指数退避封顶 30s。
+  // 断流自愈 v2：迭代器可能静默完结（→ 外层重订阅），也可能**挂起**——
+  // 不 yield、不返回、不报错（实测：server 重启后 ~40s 事件即停，流半死）。
+  // 看门狗：超 STALL_MS 无事件即 abort 当前迭代器，逼循环走重订阅路径。
+  const STALL_MS = 45_000;
+  let controller = new AbortController();
+  let lastEventAt = Date.now();
+  const watchdog = setInterval(() => {
+    if (Date.now() - lastEventAt > STALL_MS) {
+      dbg("watchdog: stream stalled; aborting iterator");
+      controller.abort();
+    }
+  }, 15_000);
   void (async () => {
     let backoffMs = 1_000;
     for (;;) {
+      controller = new AbortController();
       try {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
           backoffMs = 1_000;
+          lastEventAt = Date.now();
           await handleEvent(event);
         }
         dbg("event stream ended; resubscribing");
       } catch (error) {
-        if (controller.signal.aborted) return;
         dbg(`event stream failed: ${error && error.message ? error.message : error}; resubscribing`);
       }
       await new Promise((r) => setTimeout(r, backoffMs));
       backoffMs = Math.min(backoffMs * 2, 30_000);
-      if (controller.signal.aborted) return;
     }
   })();
 
-  // Cleanup: abort the subscription when the plugin unloads.
-  return () => controller.abort();
+  // Cleanup: stop the watchdog and abort the subscription when the plugin unloads.
+  return () => { clearInterval(watchdog); controller.abort(); };
 };
 
 // 2026-10-18 实证：本运行时（2.0.32）已验证可用的导出形态是 plain-object
