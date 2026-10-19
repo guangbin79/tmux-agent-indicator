@@ -6,6 +6,7 @@
 // pane visuals.
 
 import { execFile } from "node:child_process";
+import fs from "node:fs";
 
 // Resolve the V2 plugin helper when running inside OpenCode; fall back to an
 // identity shim so the module also loads under plain Node (tests, syntax
@@ -28,6 +29,9 @@ const IDLE_GUARD_MS = 2000;
 
 // Event handler body. Exported for the stub-driver test; the default export
 // below is what the OpenCode V2 loader consumes.
+const DBG_LOG = "/tmp/opencode/tmux-plugin-debug.log";
+const dbg = (msg) => { try { fs.appendFileSync(DBG_LOG, `${new Date().toISOString()} ${msg}\n`); } catch {} };
+
 export const setup = (ctx) => {
   const dir = process.env.TMUX_AGENT_INDICATOR_DIR
     || `${process.env.HOME}/.tmux/plugins/tmux-agent-indicator`;
