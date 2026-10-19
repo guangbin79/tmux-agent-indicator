@@ -91,6 +91,7 @@ export const setup = (ctx) => {
       if (ppath === directory || directory.startsWith(ppath === "/" ? "/" : ppath + "/")) { matched = paneId; break; }
     }
     if (matched) sessionPane.set(sessionID, matched);
+    dbg(`route: session=${sessionID.slice(0, 12)} dir=${directory.slice(0, 60)} pane=${matched ?? "FALLBACK"} (cache=${cached ?? "-"})`);
     return matched;
   };
 
