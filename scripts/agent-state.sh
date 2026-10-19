@@ -452,7 +452,7 @@ case "$state" in
         # Intentional: all states style the active window's title so the window you are in signals agent activity.
         apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg"
         start_animation
-        notify_state_change "$agent" "$state" "$pane_id" &   # 后台化：邮件 60s 稳定窗不阻塞插件事件循环（2026-10-18 实测 60.2s 阻塞）
+        notify_state_change "$agent" "$state" "$pane_id" </dev/null >/dev/null 2>&1 &   # 后台化＋断管道：60s 邮件窗不阻塞（execFile 等管道全关）
         ;;
     needs-input)
         stop_animation
@@ -489,7 +489,7 @@ case "$state" in
         fi
 
         apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg"
-        notify_state_change "$agent" "$state" "$pane_id" &   # 后台化：邮件 60s 稳定窗不阻塞插件事件循环（2026-10-18 实测 60.2s 阻塞）
+        notify_state_change "$agent" "$state" "$pane_id" </dev/null >/dev/null 2>&1 &   # 后台化＋断管道：60s 邮件窗不阻塞（execFile 等管道全关）
         ;;
     done)
         stop_animation
@@ -520,7 +520,7 @@ case "$state" in
         fi
 
         apply_window_title_style "$window_id" "$state_title_bg" "$state_title_fg" "done"
-        notify_state_change "$agent" "$state" "$pane_id" &   # 后台化：邮件 60s 稳定窗不阻塞插件事件循环（2026-10-18 实测 60.2s 阻塞）
+        notify_state_change "$agent" "$state" "$pane_id" </dev/null >/dev/null 2>&1 &   # 后台化＋断管道：60s 邮件窗不阻塞（execFile 等管道全关）
 
         if is_enabled "$reset_on_focus"; then
             tmux_set_env "$pending_reset_key" "1"

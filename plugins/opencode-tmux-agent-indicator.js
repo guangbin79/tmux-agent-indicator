@@ -95,7 +95,9 @@ export const setup = (ctx) => {
     execFile(
       "bash",
       [script, "--agent", "opencode", "--state", state],
-      { env: { ...process.env, ...extraEnv } },
+      // stdio ignore：脚本内后台化的 notify 子进程会继承管道，execFile 须等
+      // 管道全关才回调——60s 邮件防抖窗会把事件循环整个噎住（蓝延迟/丢失）
+      { env: { ...process.env, ...extraEnv }, stdio: "ignore" },
       () => resolve(),
     );
   });
