@@ -251,28 +251,7 @@ export const setup = (ctx) => {
   const handleEvent = async (event) => {
     const data = event?.data;
     switch (event?.type) {
-      case "session.status": {
-        const statusType = data?.status?.type;
-        if (statusType === "busy") {
-          // Guard: don't override done if idle fired recently (race condition)
-          if (Date.now() - idleAt < IDLE_GUARD_MS) return;
-          await setState("running");
-        } else if (statusType === "idle") {
-          idleAt = Date.now();
-          await reportDone(data?.sessionID);
-        }
-        // "retry" keeps the current running state; nothing to do.
-        break;
-      }
-
-      // 2026-10-18 probe：session.status 全程零发射（死事件），用户消息入账的
-      // 真信号是 session.instructions.updated——回合开始（running 蓝）改由它驱动。
-      // 2026-10-18 probe：session.status 全程零发射（死事件），用户消息入账的
-      // 真信号是 session.instructions.updated——回合开始（running 蓝）改由它驱动。
-      // session.execution.started（与 succeeded 对称的执行开始）同样驱动 running。
-      // 2026-10-18 probe：session.status 全程零发射（死事件），用户消息入账的
-      // 真信号是 session.instructions.updated——回合开始（running 蓝）改由它驱动。
-      // session.execution.started（与 succeeded 对称的执行开始）同样驱动 running。
+      // 2026-10-18 probe：session.status 全程零发射（死事件，V1 遗留），已移除。
       // 计数只认 execution.started（instructions 与之并存，双计会毒化配对判据）。
       case "session.execution.started": {
         if (data?.sessionID) {
@@ -291,18 +270,8 @@ export const setup = (ctx) => {
         break;
       }
 
-      // session.idle fires alongside status idle; setState dedupes.
-      case "session.idle": {
-        idleAt = Date.now();
-        await reportDone(data?.sessionID);
-        break;
-      }
-
-      // 2026-10-18 probe：session.idle/status 从不发射，回合完成真信号是
-      // session.execution.succeeded。但它可能是上一执行的迟到回执（用户在响应
-      // 流式输出期间发出新消息时，succeeded 晚于新 instructions 到达）——
-      // 30 秒新指令窗口内的 succeeded 视为陈旧，忽略（防红蓝误翻；真实完成
-      // 会在下个回合末自愈）。
+      // 2026-10-18 probe：session.idle 从不发射（死事件），回合完成真信号是
+      // session.execution.succeeded（计数器配对防上一执行迟到回执）。
       case "session.execution.succeeded": {
         const sid = data?.sessionID;
         const sDone = (succeededCount.get(sid) || 0) + 1;
@@ -319,7 +288,7 @@ export const setup = (ctx) => {
       }
 
       case "session.error": {
-        idleAt = Date.now();
+        idleAtBySession.set(data?.sessionID, Date.now());
         await reportDone(data?.sessionID, buildErrorDetail(data));
         break;
       }
@@ -340,8 +309,10 @@ export const setup = (ctx) => {
       case "permission.replied":
       case "form.replied":
       case "form.cancelled": {
-        if (Date.now() - idleAt < IDLE_GUARD_MS) return;
-        await setState("running");
+        const sid = data?.sessionID || null;
+        const lastIdle = sid ? (idleAtBySession.get(sid) || 0) : 0;
+        if (Date.now() - lastIdle < IDLE_GUARD_MS) return;
+        await setState("running", { sessionID: sid });
         break;
       }
     }
