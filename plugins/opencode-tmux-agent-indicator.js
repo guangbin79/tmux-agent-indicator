@@ -313,14 +313,24 @@ export const setup = (ctx) => {
   };
 
   const controller = new AbortController();
+  // 断流自愈：事件迭代器可能静默完结（服务端关闭/热重载竞态）——外层循环
+  // 重订阅（review-loop 同款模式），指数退避封顶 30s。
   void (async () => {
-    try {
-      for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
-        await handleEvent(event);
+    let backoffMs = 1_000;
+    for (;;) {
+      try {
+        for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+          backoffMs = 1_000;
+          await handleEvent(event);
+        }
+        dbg("event stream ended; resubscribing");
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        dbg(`event stream failed: ${error && error.message ? error.message : error}; resubscribing`);
       }
-    } catch (error) {
+      await new Promise((r) => setTimeout(r, backoffMs));
+      backoffMs = Math.min(backoffMs * 2, 30_000);
       if (controller.signal.aborted) return;
-      console.error("[tmux-agent-indicator] event stream failed:", error);
     }
   })();
 
