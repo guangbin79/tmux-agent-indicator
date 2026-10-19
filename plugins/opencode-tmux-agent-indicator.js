@@ -264,6 +264,8 @@ export const setup = (ctx) => {
       }
       case "session.instructions.updated": {
         const sid = data?.sessionID || null;
+        // 新回合开始＝旧失衡作废：孤儿/迟到计数全部对齐（sync 后 started 再自增）
+        if (sid) startedCount.set(sid, succeededCount.get(sid) || 0);
         const lastIdle = sid ? (idleAtBySession.get(sid) || 0) : 0;
         if (Date.now() - lastIdle < IDLE_GUARD_MS) return;
         await setState("running", { sessionID: sid });
