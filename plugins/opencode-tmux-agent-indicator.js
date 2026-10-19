@@ -248,7 +248,8 @@ export const setup = (ctx) => {
       // 计数只认 execution.started（instructions 与之并存，双计会毒化配对判据）。
       case "session.execution.started": {
         if (data?.sessionID) {
-          startedCount.set(data.sessionID, (startedCount.get(data.sessionID) || 0) + 1);
+          // 不变量：至多一个在途执行——被打断执行的孤儿计数在此自愈
+          startedCount.set(data.sessionID, (succeededCount.get(data.sessionID) || 0) + 1);
           const lastIdle = idleAtBySession.get(data.sessionID) || 0;
           if (Date.now() - lastIdle < IDLE_GUARD_MS) return;
           await setState("running", { sessionID: data.sessionID });
