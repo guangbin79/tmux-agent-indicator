@@ -275,14 +275,14 @@ export const setup = (ctx) => {
       case "session.execution.started": {
         if (data?.sessionID) {
           startedCount.set(data.sessionID, (startedCount.get(data.sessionID) || 0) + 1);
+          if (Date.now() - idleAt < IDLE_GUARD_MS) return;
+          await setState("running", { sessionID: data.sessionID });
         }
-        if (Date.now() - idleAt < IDLE_GUARD_MS) return;
-        await setState("running");
         break;
       }
       case "session.instructions.updated": {
         if (Date.now() - idleAt < IDLE_GUARD_MS) return;
-        await setState("running");
+        await setState("running", { sessionID: data?.sessionID || null });
         break;
       }
 
