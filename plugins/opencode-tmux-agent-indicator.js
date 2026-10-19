@@ -315,6 +315,7 @@ export const setup = (ctx) => {
     }
   };
 
+  const controller = new AbortController();
   // 断流自愈：迭代器静默完结（服务端关闭/热重载竞态）→ 外层循环重订阅。
   // 2026-10-19 实测：基于墙钟的 stall 看门狗在系统休眠后被误判触发，且
   // abort 后的二次 subscribe 返回死流（同 server 上只订一次的探针全程健康）
