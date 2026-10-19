@@ -39,8 +39,8 @@ export const setup = (ctx) => {
     || `${process.env.HOME}/.tmux/plugins/tmux-agent-indicator`;
   const script = `${dir}/scripts/agent-state.sh`;
 
-  let lastState = "off";
-  let idleAt = 0;
+  const lastStateByPane = new Map(); // paneId -> last state（按 pane 去重：多会话互不吞写）
+  const idleAtBySession = new Map(); // sessionID -> 最近完成 ts（迟复守卫按会话隔离）
   const startedCount = new Map(); // sessionID -> execution.started 计数（在途执行判别）
   const succeededCount = new Map(); // sessionID -> execution.succeeded 计数
 
@@ -148,8 +148,10 @@ export const setup = (ctx) => {
   const setState = async (state, { sessionID = "", sessionTitle = "", lastMessage = "", stateDetail = "" } = {}) => {
     const paneId = sessionID ? await resolvePaneForSession(sessionID) : null;
     const paneEnv = paneId ? { TMUX_PANE: paneId } : {};
-    if (state === lastState) return;
-    lastState = state;
+    if (paneId && lastStateByPane.get(paneId) === state) return;
+    if (paneId) lastStateByPane.set(paneId, state);
+    else if (!paneId && lastStateByPane.get("fallback") === state) return;
+    lastStateByPane.set("fallback", state);
     try {
       if (state === "running") {
         // Reset deferred done styling before re-entering running.
@@ -275,14 +277,17 @@ export const setup = (ctx) => {
       case "session.execution.started": {
         if (data?.sessionID) {
           startedCount.set(data.sessionID, (startedCount.get(data.sessionID) || 0) + 1);
-          if (Date.now() - idleAt < IDLE_GUARD_MS) return;
+          const lastIdle = idleAtBySession.get(data.sessionID) || 0;
+          if (Date.now() - lastIdle < IDLE_GUARD_MS) return;
           await setState("running", { sessionID: data.sessionID });
         }
         break;
       }
       case "session.instructions.updated": {
-        if (Date.now() - idleAt < IDLE_GUARD_MS) return;
-        await setState("running", { sessionID: data?.sessionID || null });
+        const sid = data?.sessionID || null;
+        const lastIdle = sid ? (idleAtBySession.get(sid) || 0) : 0;
+        if (Date.now() - lastIdle < IDLE_GUARD_MS) return;
+        await setState("running", { sessionID: sid });
         break;
       }
 
@@ -308,7 +313,7 @@ export const setup = (ctx) => {
           break;
         }
         dbg(`HIT execution.succeeded sessionID=${sid ?? "-"}`);
-        idleAt = Date.now();
+        idleAtBySession.set(sid, Date.now());
         await reportDone(data?.sessionID);
         break;
       }
