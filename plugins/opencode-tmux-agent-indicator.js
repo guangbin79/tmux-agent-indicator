@@ -345,7 +345,6 @@ export const setup = (ctx) => {
   void (async () => {
     try {
       for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
-        dbg(`event: ${event?.type ?? "?"} sessionID=${event?.data?.sessionID ?? "-"}`);
         await handleEvent(event);
       }
     } catch (error) {
