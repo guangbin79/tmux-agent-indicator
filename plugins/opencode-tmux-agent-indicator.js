@@ -44,6 +44,56 @@ export const setup = (ctx) => {
   const startedCount = new Map(); // sessionID -> execution.started 计数（在途执行判别）
   const succeededCount = new Map(); // sessionID -> execution.succeeded 计数
 
+  // ---- session→pane 路由（2026-10-18 多目录多会话支持）----
+  // session.location.directory ↔ pane cwd 匹配：每个 opencode pane 的状态只写
+  // 自己的 pane（经 TMUX_PANE 优先通道），多目录并发会话互不串扰；顺带清理
+  // 死 pane 的注册/状态键。
+  const sessionPane = new Map(); // sessionID -> pane_id
+  const listAgentPanes = () => new Promise((resolve) => {
+    execFile("tmux", ["list-panes", "-a", "-F", "#{pane_id}|#{pane_current_command}|#{pane_current_path}"],
+      (err, stdout) => resolve(err ? [] : String(stdout).split("\n").filter(Boolean)));
+  });
+  const paneAlive = (paneId) => new Promise((resolve) => {
+    execFile("tmux", ["display-message", "-p", "-t", paneId, "#{pane_id}"],
+      (err, stdout) => resolve(!err && String(stdout).trim() === paneId));
+  });
+  const prunePaneKeys = (livePanes) => new Promise((resolve) => {
+    execFile("tmux", ["show-environment", "-g"], (err, stdout) => {
+      if (err) return resolve();
+      const live = new Set(livePanes);
+      const dead = String(stdout).split("\n")
+        .map((l) => (l.match(/^TMUX_AGENT_PANE_(%[0-9]+)_(?:AGENT|STATE)=/) || [])[1])
+        .filter((p) => p && !live.has(p));
+      for (const p of dead) {
+        execFile("tmux", ["set-environment", "-gu", `TMUX_AGENT_PANE_${p}_AGENT`], () => {});
+        execFile("tmux", ["set-environment", "-gu", `TMUX_AGENT_PANE_${p}_STATE`], () => {});
+      }
+      resolve();
+    });
+  });
+  const resolvePaneForSession = async (sessionID) => {
+    if (!sessionID) return null;
+    const cached = sessionPane.get(sessionID);
+    if (cached && (await paneAlive(cached))) return cached;
+    sessionPane.delete(sessionID);
+    let directory = "";
+    try {
+      const session = await ctx.session.get({ sessionID });
+      directory = session?.location?.directory || "";
+    } catch { return null; }
+    if (!directory) return null;
+    const panes = await listAgentPanes();
+    await prunePaneKeys(panes.map((l) => l.split("|")[0]));
+    let matched = null;
+    for (const line of panes) {
+      const [paneId, cmd, ppath] = line.split("|");
+      if (cmd !== "opencode") continue;
+      if (ppath === directory || directory.startsWith(ppath === "/" ? "/" : ppath + "/")) { matched = paneId; break; }
+    }
+    if (matched) sessionPane.set(sessionID, matched);
+    return matched;
+  };
+
   // Run agent-state.sh via execFile with an explicit args array and env
   // overlay — no shell interpolation, so titles and messages cannot break
   // quoting. Failures are non-fatal: tmux may not be available.
@@ -94,15 +144,18 @@ export const setup = (ctx) => {
     }
   };
 
-  const setState = async (state, { sessionTitle = "", lastMessage = "", stateDetail = "" } = {}) => {
+  const setState = async (state, { sessionID = "", sessionTitle = "", lastMessage = "", stateDetail = "" } = {}) => {
+    const paneId = sessionID ? await resolvePaneForSession(sessionID) : null;
+    const paneEnv = paneId ? { TMUX_PANE: paneId } : {};
     if (state === lastState) return;
     lastState = state;
     try {
       if (state === "running") {
         // Reset deferred done styling before re-entering running.
-        await runAgentState("off", {});
+        await runAgentState("off", paneEnv);
       }
       await runAgentState(state, {
+        ...paneEnv,
         OPENCODE_SESSION_TITLE: sessionTitle,
         OPENCODE_LAST_MESSAGE: lastMessage,
         OPENCODE_STATE_DETAIL: stateDetail,
@@ -118,7 +171,7 @@ export const setup = (ctx) => {
         resolveSessionTitle(sessionID),
         resolveLastAssistantMessage(sessionID),
       ]);
-      await setState("done", { sessionTitle: title, lastMessage: message, stateDetail });
+      await setState("done", { sessionID, sessionTitle: title, lastMessage: message, stateDetail });
     } else {
       await setState("done", { stateDetail });
     }
@@ -130,7 +183,7 @@ export const setup = (ctx) => {
         resolveSessionTitle(sessionID),
         resolveLastAssistantMessage(sessionID),
       ]);
-      await setState("needs-input", { sessionTitle: title, lastMessage: message, stateDetail });
+      await setState("needs-input", { sessionID, sessionTitle: title, lastMessage: message, stateDetail });
     } else {
       await setState("needs-input", { stateDetail });
     }
