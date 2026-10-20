@@ -31,12 +31,36 @@ record = json.dumps({
         "OPENCODE_SESSION_TITLE": os.environ.get("OPENCODE_SESSION_TITLE"),
         "OPENCODE_LAST_MESSAGE": os.environ.get("OPENCODE_LAST_MESSAGE"),
         "OPENCODE_STATE_DETAIL": os.environ.get("OPENCODE_STATE_DETAIL"),
+        "TMUX_PANE": os.environ.get("TMUX_PANE"),
     },
 })
 with open(os.environ["TMUX_AGENT_INDICATOR_CAPTURE"], "a") as fh:
     fh.write(record + "\\n")
 PY
 `);
+// Minimal tmux shim backed by a fixture panes file: exercises the plugin's
+// session→pane routing (list-panes / pane liveness / global env) without a
+// live tmux server. Tests rewrite the panes file to set the topology.
+const panesFile = join(fixtureDir, "panes");
+writeFileSync(panesFile, "%1|opencode|/fixture/proj\n%2|bash|/fixture/other\n");
+writeFileSync(join(fixtureDir, "tmux"), `#!/usr/bin/env bash
+case "\$1" in
+    list-panes) cat "\$TMUX_FIXTURE_PANES" ;;
+    display-message)
+        target=""
+        prev=""
+        for a in "\$@"; do
+            [ "\$prev" = "-t" ] && target="\$a"
+            prev="\$a"
+        done
+        grep -q "^\${target}|" "\$TMUX_FIXTURE_PANES" && echo "\$target"
+        ;;
+    *) ;;
+esac
+`);
+execFileSync("chmod", ["+x", join(fixtureDir, "tmux")]);
+process.env.PATH = `${fixtureDir}:${process.env.PATH}`;
+process.env.TMUX_FIXTURE_PANES = panesFile;
 process.env.TMUX_AGENT_INDICATOR_DIR = fixtureDir;
 
 const failures = [];
@@ -82,9 +106,14 @@ const makeBus = () => {
     };
 };
 
-// Fake V2 session domain. Overridable per instance.
+// Fake V2 session domain. Overridable per instance. Default directory routes
+// to the default fixture pane %1 (cwd /fixture/proj).
 const makeSessionStub = (overrides = {}) => ({
-    get: overrides.get ?? (async ({ sessionID }) => ({ id: sessionID, title: "T" })),
+    get: overrides.get ?? (async ({ sessionID }) => ({
+        id: sessionID,
+        title: "T",
+        location: { directory: "/fixture/proj" },
+    })),
     context: overrides.context ?? (async () => [
         { type: "user", content: [{ type: "text", text: "q" }] },
         { type: "assistant", content: [{ type: "text", text: "agent says hi" }] },
@@ -138,13 +167,14 @@ check("default export: {id, setup} for the V2 loader",
 {
     const p = makePlugin();
 
-    // 1. session.status busy -> off (running reset) then running with empty
-    //    OPENCODE_* env (empty value = skip property application downstream).
-    let batch = await p.pump("session.status", { sessionID: "s1", status: { type: "busy" } });
-    check("session.status busy: off then running",
+    // 1. session.execution.started -> off (running reset) then running with
+    //    empty OPENCODE_* env (empty value = skip property application
+    //    downstream).
+    let batch = await p.pump("session.execution.started", { sessionID: "s1" });
+    check("execution.started: off then running",
         JSON.stringify(states(batch)) === JSON.stringify(["off", "running"]),
         JSON.stringify(batch));
-    check("session.status busy: off has no OPENCODE_* env, running has empty values",
+    check("execution.started: off has no OPENCODE_* env, running has empty values",
         batch.length === 2
         && batch[0].env.OPENCODE_SESSION_TITLE === null
         && batch[1].env.OPENCODE_SESSION_TITLE === ""
@@ -223,23 +253,23 @@ check("default export: {id, setup} for the V2 loader",
         JSON.stringify(states(batch)) === JSON.stringify(["off", "running"]),
         JSON.stringify(batch));
 
-    // 8. session.status idle -> resolve title/message, then done.
-    batch = await p.pump("session.status", { sessionID: "s1", status: { type: "idle" } });
-    check("session.status idle: done with title + last message",
+    // 8. session.execution.succeeded -> resolve title/message, then done.
+    batch = await p.pump("session.execution.succeeded", { sessionID: "s1" });
+    check("execution.succeeded: done with title + last message",
         batch.length === 1
         && argState(batch[0]) === "done"
         && batch[0].env.OPENCODE_SESSION_TITLE === "T"
         && batch[0].env.OPENCODE_LAST_MESSAGE === "agent says hi",
         JSON.stringify(batch));
 
-    // 9. session.idle firing alongside status idle -> deduped, no new command.
-    batch = await p.pump("session.idle", { sessionID: "s1" });
-    check("session.idle after status idle: no new command (dedup)", batch.length === 0,
+    // 9. duplicate succeeded for the same pane -> deduped, no new command.
+    batch = await p.pump("session.execution.succeeded", { sessionID: "s1" });
+    check("duplicate succeeded: no new command (dedup)", batch.length === 0,
         JSON.stringify(batch));
 
-    // 10. malformed session.status (no data) -> must not throw, no command.
-    batch = await p.pump("session.status", {});
-    check("malformed session.status: no throw, no command", batch.length === 0,
+    // 10. malformed watched event (no data) -> must not throw, no command.
+    batch = await p.pump("session.viewed", {});
+    check("malformed session.viewed: no throw, no command", batch.length === 0,
         JSON.stringify(batch));
 
     // 11. late replies within 2s of idle must NOT flip done back to running.
@@ -360,20 +390,17 @@ check("default export: {id, setup} for the V2 loader",
 }
 
 {
-    // API failures are non-fatal: done falls back to empty title/message.
+    // API failures are non-fatal: the session cannot be routed (no directory
+    // available), so the event is dropped instead of fallback-styling an
+    // arbitrary pane.
     const p = makePlugin({
         session: {
             get: async () => { throw new Error("down"); },
             context: async () => { throw new Error("down"); },
         },
     });
-    await p.pump("session.status", { sessionID: "s1", status: { type: "idle" } });
-    const batch = p.lines();
-    check("session API failure: done with empty title/message",
-        batch.length === 1
-        && argState(batch[0]) === "done"
-        && batch[0].env.OPENCODE_SESSION_TITLE === ""
-        && batch[0].env.OPENCODE_LAST_MESSAGE === "",
+    const batch = await p.pump("session.execution.succeeded", { sessionID: "s1" });
+    check("session API failure: unroutable event is dropped", batch.length === 0,
         JSON.stringify(batch));
 }
 
@@ -390,7 +417,7 @@ check("default export: {id, setup} for the V2 loader",
             ],
         },
     });
-    await p.pump("session.status", { sessionID: "s1", status: { type: "idle" } });
+    await p.pump("session.execution.succeeded", { sessionID: "s1" });
     const batch = p.lines();
     check("tool-call-only last turn: falls back to earlier assistant text",
         batch.length === 1 && batch[0].env.OPENCODE_LAST_MESSAGE === "earlier answer",
@@ -401,11 +428,11 @@ check("default export: {id, setup} for the V2 loader",
     // Non-string title is treated as missing.
     const p = makePlugin({
         session: {
-            get: async () => ({ id: "s1", title: 42 }),
+            get: async () => ({ id: "s1", title: 42, location: { directory: "/fixture/proj" } }),
             context: async () => [],
         },
     });
-    await p.pump("session.status", { sessionID: "s1", status: { type: "idle" } });
+    await p.pump("session.execution.succeeded", { sessionID: "s1" });
     const batch = p.lines();
     check("non-string title: empty string forwarded",
         batch.length === 1
@@ -420,7 +447,11 @@ check("default export: {id, setup} for the V2 loader",
     // slow. V2 processes events serially, so sB waits for sA.
     const p = makePlugin({
         session: {
-            get: async ({ sessionID }) => ({ id: sessionID, title: `title-${sessionID}` }),
+            get: async ({ sessionID }) => ({
+                id: sessionID,
+                title: `title-${sessionID}`,
+                location: { directory: "/fixture/proj" },
+            }),
             context: async ({ sessionID }) => {
                 if (sessionID === "sA") await new Promise((resolve) => setTimeout(resolve, 30));
                 return [
@@ -429,7 +460,7 @@ check("default export: {id, setup} for the V2 loader",
             },
         },
     });
-    await p.pump("session.status", { sessionID: "sA", status: { type: "idle" } });
+    await p.pump("session.execution.succeeded", { sessionID: "sA" });
     await p.pump("permission.asked", { sessionID: "sB", action: "bash", resources: ["ls"] });
     const batch = p.lines();
     const done = batch.find((line) => argState(line) === "done");
@@ -447,14 +478,62 @@ check("default export: {id, setup} for the V2 loader",
 }
 
 {
-    // busy right after a previous running state: still resets via off.
+    // Repeated started for the same pane: deduped to the first off,running.
     const p = makePlugin();
-    await p.pump("session.status", { sessionID: "s1", status: { type: "busy" } });
-    await p.pump("session.status", { sessionID: "s1", status: { type: "retry" } });
+    await p.pump("session.execution.started", { sessionID: "s1" });
+    await p.pump("session.execution.started", { sessionID: "s1" });
     await new Promise((resolve) => setTimeout(resolve, 20));
     const batch = p.lines();
-    check("session.status retry: no state change",
+    check("repeated execution.started: no state change",
         batch.length === 2 && states(batch).join(",") === "off,running",
+        JSON.stringify(batch));
+}
+
+// --- routing gate: foreign sessions must not style any pane ------------------
+// Regression harness for the red→blue crosstalk: a headless delegation's
+// execution.started must never reach another pane, via prefix match or via
+// the agent-state.sh no-TMUX_PANE fallback (which picks the first done pane).
+{
+    // Topology: %5 opencode in /w/proj, %6 opencode in /w/other.
+    writeFileSync(panesFile, "%5|opencode|/w/proj\n%6|opencode|/w/other\n");
+    const mk = (directory) => makePlugin({
+        session: {
+            get: async ({ sessionID }) => ({ id: sessionID, title: "T", location: { directory } }),
+            context: async () => [{ type: "assistant", content: [{ type: "text", text: "m" }] }],
+        },
+    });
+
+    // A. Exact-match routing: a session in a SUBDIRECTORY of a pane cwd must
+    //    not match that pane (prefix matching routes foreign child sessions
+    //    to ancestor panes).
+    let p = mk("/w/proj/sub");
+    let batch = await p.pump("session.execution.started", { sessionID: "child1" });
+    check("routing: subdirectory session does not match ancestor pane", batch.length === 0,
+        JSON.stringify(batch));
+
+    // B. Unroutable session (no pane in its directory): dropped, never
+    //    fallback-styled.
+    p = mk("/elsewhere");
+    batch = await p.pump("session.execution.started", { sessionID: "foreign" });
+    check("routing: unroutable session is dropped (no fallback write)", batch.length === 0,
+        JSON.stringify(batch));
+
+    // C. Exact match still routes the pane's own session, via TMUX_PANE.
+    p = mk("/w/other");
+    batch = await p.pump("session.execution.started", { sessionID: "own" });
+    check("routing: own session styles its pane via TMUX_PANE",
+        JSON.stringify(states(batch)) === JSON.stringify(["off", "running"])
+        && batch.every((line) => line.env.TMUX_PANE === "%6"),
+        JSON.stringify(batch));
+
+    // D. No-sessionID events keep the legacy fallback (single-pane setups);
+    //    it inherits the plugin process's own TMUX_PANE (observed live: that
+    //    inheritance is how fallback writes land on arbitrary panes).
+    p = makePlugin();
+    batch = await p.pump("permission.asked", { action: "bash", resources: [] });
+    check("no-sessionID permission: fallback write without TMUX_PANE",
+        batch.length === 1 && argState(batch[0]) === "needs-input"
+        && batch[0].env.TMUX_PANE === process.env.TMUX_PANE,
         JSON.stringify(batch));
 }
 

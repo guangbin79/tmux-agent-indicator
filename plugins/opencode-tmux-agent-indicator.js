@@ -87,7 +87,8 @@ export const setup = (ctx) => {
     for (const line of panes) {
       const [paneId, cmd, ppath] = line.split("|");
       if (cmd !== "opencode") continue;
-      if (ppath === directory || directory.startsWith(ppath === "/" ? "/" : ppath + "/")) { matched = paneId; break; }
+      // 全等匹配：前缀匹配会把子目录里的外来子会话路由到祖先 pane。
+      if (ppath === directory) { matched = paneId; break; }
     }
     if (matched) sessionPane.set(sessionID, matched);
     return matched;
@@ -147,6 +148,9 @@ export const setup = (ctx) => {
 
   const setState = async (state, { sessionID = "", sessionTitle = "", lastMessage = "", stateDetail = "" } = {}) => {
     const paneId = sessionID ? await resolvePaneForSession(sessionID) : null;
+    // 无法路由的会话（headless 委托子会话等）直接放弃：无 TMUX_PANE 的兜底
+    // 会让 agent-state.sh 按全局 env 挑替补 pane，误翻别家（红→蓝串扰根因）。
+    if (sessionID && !paneId) return;
     const paneEnv = paneId ? { TMUX_PANE: paneId } : {};
     if (paneId && lastStateByPane.get(paneId) === state) return;
     if (paneId) lastStateByPane.set(paneId, state);
