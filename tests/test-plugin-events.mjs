@@ -632,6 +632,62 @@ check("default export: {id, setup} for the V2 loader",
         staleBatch.length === 0, JSON.stringify(staleBatch));
 }
 
+// --- subagent sessions (parentID) must not style panes (gt-b2dd) -------------
+// Subagent sessions inherit the parent's directory, so exact-match routing
+// binds them to the parent pane; gt-37eb additionally wrote those bindings
+// through to disk. The parent check must run BEFORE the cached-binding hit.
+{
+    writeFileSync(panesFile, "%1|opencode|/fixture/proj\n%2|bash|/fixture/other\n");
+    const readBindingsAt = (path) => {
+        try { return JSON.parse(readFileSync(path, "utf8")).bindings ?? {}; } catch { return {}; }
+    };
+    const childSession = (getOverrides = {}) => ({
+        get: async ({ sessionID }) => ({
+            id: sessionID,
+            title: "T",
+            location: { directory: "/fixture/proj" },
+            parentID: "ses_parent",
+            ...getOverrides,
+        }),
+        context: async () => [{ type: "assistant", content: [{ type: "text", text: "m" }] }],
+    });
+
+    // A. Child session: started/succeeded produce ZERO agent-state calls.
+    //    The directory matches %1 exactly, so only the parent check stops it.
+    const child = makePlugin({ session: childSession() });
+    const aBatch = [
+        ...await child.pump("session.execution.started", { sessionID: "kid1" }),
+        ...await child.pump("session.execution.succeeded", { sessionID: "kid1" }),
+    ];
+    check("subagent: parentID session events produce zero agent-state calls",
+        aBatch.length === 0, JSON.stringify(aBatch));
+
+    // A2. Alternate parent field spellings count as children too.
+    const snake = makePlugin({ session: childSession({ parentID: undefined, parent_id: "ses_parent" }) });
+    const snakeBatch = await snake.pump("session.execution.started", { sessionID: "kid1b" });
+    check("subagent: parent_id fallback spelling also skipped", snakeBatch.length === 0,
+        JSON.stringify(snakeBatch));
+
+    // B. Polluted persisted binding (child -> %1 written through by an earlier
+    //    bug): the child event must purge the disk entry AND style nothing.
+    const pollutedPath = join(fixtureDir, "bindings-polluted.json");
+    writeFileSync(pollutedPath, JSON.stringify({ pid: "4242", bindings: { kid2: "%1" } }));
+    const dirty = makePlugin({ bindingsFile: pollutedPath, session: childSession() });
+    const dirtyBatch = await dirty.pump("session.execution.succeeded", { sessionID: "kid2" });
+    check("subagent: polluted persisted binding produces no styling",
+        dirtyBatch.length === 0, JSON.stringify(dirtyBatch));
+    check("subagent: polluted binding purged from disk",
+        !("kid2" in readBindingsAt(pollutedPath)), readFileSync(pollutedPath, "utf8"));
+
+    // C. Main session (no parentID): routing behavior unchanged.
+    const main = makePlugin();
+    const mainBatch = await main.pump("session.execution.started", { sessionID: "main1" });
+    check("subagent: main session without parentID still styles its pane",
+        JSON.stringify(states(mainBatch)) === JSON.stringify(["off", "running"])
+        && mainBatch.every((line) => line.env.TMUX_PANE === "%1"),
+        JSON.stringify(mainBatch));
+}
+
 if (failures.length > 0) {
     console.error(`FAIL: ${failures.length} assertion(s) failed:`);
     for (const f of failures) console.error(`  - ${f}`);

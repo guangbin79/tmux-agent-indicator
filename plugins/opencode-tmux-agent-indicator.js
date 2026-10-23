@@ -44,6 +44,7 @@ export const setup = (ctx) => {
   const routeWarnedBySession = new Set(); // 已告警过路由失败的 session（成功路由即清除）
   const startedCount = new Map(); // sessionID -> execution.started 计数（在途执行判别）
   const succeededCount = new Map(); // sessionID -> execution.succeeded 计数
+  const childBySid = new Map(); // sessionID -> 是否子会话（parent 判定缓存：子代理事件风暴下不重复 API）
 
   // ---- session→pane 路由（2026-10-18 多目录多会话支持）----
   // session.location.directory ↔ pane cwd 匹配：每个 opencode pane 的状态只写
@@ -126,6 +127,21 @@ export const setup = (ctx) => {
   });
   const resolvePaneForSession = async (sessionID) => {
     if (!sessionID) return null;
+    // 子会话判别必须先于 cached-binding 命中：subagent 继承父会话 directory，
+    // 全等匹配会误绑父 pane，且 gt-37eb 已把误绑写穿磁盘——污染条目也必须在
+    // 此失效（绑定命中前 return null）。V2 API 实测（2.1.2，2026-10-23）字段
+    // 名 parentID；兜底其余拼写变体，任一非空即子会话。
+    if (!childBySid.has(sessionID)) {
+      try {
+        const session = await ctx.session.get({ sessionID });
+        childBySid.set(sessionID, Boolean(session?.parentID ?? session?.parent_id ?? session?.parentId));
+      } catch { return null; } // 取不到会话＝directory 也无从解析；不缓存，下次事件重试
+    }
+    if (childBySid.get(sessionID)) {
+      // 磁盘去污：历史污染绑定条目若在，显式 deletedKey 读-合并-写删除。
+      if (sessionPane.delete(sessionID)) persistBindings(sessionPane, sessionID);
+      return null;
+    }
     const cached = sessionPane.get(sessionID);
     if (cached && (await paneAlive(cached))) {
       if (fromDisk.delete(sessionID)) dbg(`routed ${sessionID.slice(0, 12)} via persisted binding ${cached}`);
