@@ -41,6 +41,7 @@ export const setup = (ctx) => {
 
   const lastStateByPane = new Map(); // paneId -> last state（按 pane 去重：多会话互不吞写）
   const idleAtBySession = new Map(); // sessionID -> 最近完成 ts（迟复守卫按会话隔离）
+  const routeWarnedBySession = new Set(); // 已告警过路由失败的 session（成功路由即清除）
   const startedCount = new Map(); // sessionID -> execution.started 计数（在途执行判别）
   const succeededCount = new Map(); // sessionID -> execution.succeeded 计数
 
@@ -212,7 +213,15 @@ export const setup = (ctx) => {
     const paneId = sessionID ? await resolvePaneForSession(sessionID) : null;
     // 无法路由的会话（headless 委托子会话等）直接放弃：无 TMUX_PANE 的兜底
     // 会让 agent-state.sh 按全局 env 挑替补 pane，误翻别家（红→蓝串扰根因）。
-    if (sessionID && !paneId) return;
+    // 静默丢弃曾让排查无线索（gt 既往痛点）：留痕一条，按会话去重防刷屏。
+    if (sessionID && !paneId) {
+      if (!routeWarnedBySession.has(sessionID)) {
+        routeWarnedBySession.add(sessionID);
+        dbg(`route failed: sid=${sessionID.slice(0, 12)} no persisted binding and no directory-exact pane match`);
+      }
+      return;
+    }
+    if (sessionID) routeWarnedBySession.delete(sessionID);
     const paneEnv = paneId ? { TMUX_PANE: paneId } : {};
     if (paneId && lastStateByPane.get(paneId) === state) return;
     if (paneId) lastStateByPane.set(paneId, state);
@@ -314,7 +323,7 @@ export const setup = (ctx) => {
     return capDetail(message ? `[error] ${name}: ${message}` : `[error] ${name}`);
   };
 
-  const WATCHED = new Set(["session.instructions.updated", "session.execution.started", "session.execution.succeeded", "session.viewed", "session.error", "permission.asked", "permission.replied", "form.created", "form.replied", "form.cancelled"]);
+  const WATCHED = new Set(["session.instructions.updated", "session.execution.started", "session.execution.succeeded", "session.execution.interrupted", "session.viewed", "session.error", "permission.asked", "permission.replied", "form.created", "form.replied", "form.cancelled"]);
   const handleEvent = async (event) => {
     if (WATCHED.has(event?.type)) dbg(`evt ${event.type} sid=${String(event?.data?.sessionID ?? "-").slice(0, 12)}`);
     const data = event?.data;
@@ -353,6 +362,16 @@ export const setup = (ctx) => {
       case "session.error": {
         idleAtBySession.set(data?.sessionID, Date.now());
         await reportDone(data?.sessionID, buildErrorDetail(data));
+        break;
+      }
+
+      // 用户主动打断＝清除而非完成（不要 done 提醒）。镜像 session.error 设
+      // IDLE_GUARD：防打断后迟到的 replied 把 pane 翻回 running。计数不动：
+      // 孤儿 started 由 started 分支的不变量（startedCount=succeededCount+1）
+      // 在下回合自愈配平。
+      case "session.execution.interrupted": {
+        idleAtBySession.set(data?.sessionID, Date.now());
+        await setState("off", { sessionID: data?.sessionID });
         break;
       }
 

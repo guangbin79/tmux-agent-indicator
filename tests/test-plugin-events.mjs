@@ -384,6 +384,27 @@ check("default export: {id, setup} for the V2 loader",
 }
 
 {
+    // ESC interrupt: user abort clears styling (off), never done. The idle
+    // guard is armed like session.error, so a trailing reply within 2s
+    // cannot flip the pane back to running. Counters stay untouched: the
+    // orphan started rebalances on the next round.
+    const p = makePlugin();
+    await p.pump("session.execution.started", { sessionID: "s1" });
+    const batch = await p.pump("session.execution.interrupted", { sessionID: "s1" });
+    check("execution.interrupted: off (not done)",
+        batch.length === 1 && argState(batch[0]) === "off", JSON.stringify(batch));
+    const late = await p.pump("permission.replied", { sessionID: "s1", requestID: "per_i", reply: "once" });
+    check("late reply after interrupted: guard suppresses flip to running",
+        late.length === 0, JSON.stringify(late));
+    const rebalance = [];
+    rebalance.push(...await p.pump("session.execution.started", { sessionID: "s1" }));
+    rebalance.push(...await p.pump("session.execution.succeeded", { sessionID: "s1" }));
+    check("orphan started rebalances: next round still reaches done",
+        JSON.stringify(states(rebalance)) === JSON.stringify(["off", "running", "done"]),
+        JSON.stringify(rebalance));
+}
+
+{
     // session.error without sessionID: detail still forwarded, no lookups.
     const p = makePlugin();
     await p.pump("session.error", { error: { name: "E", message: "m" } });
