@@ -5,6 +5,9 @@ set -euo pipefail
 
 TEST_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$TEST_LIB_DIR/../.." && pwd)"
+# tmux resolves -L sockets under ${TMUX_TMPDIR:-/tmp}/tmux-$(id -u); tmux_cmd
+# only strips TMUX, so an inherited TMUX_TMPDIR moves the socket dir.
+TMUX_SOCKET_DIR="${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)"
 
 SOCK=""
 PANE=""
@@ -26,7 +29,7 @@ cleanup_test_server() {
     if [ -n "${SOCK:-}" ]; then
         tmux_cmd kill-server >/dev/null 2>&1 || true
         # kill-server normally unlinks the socket; rm is the fallback.
-        rm -f "/tmp/tmux-$(id -u)/${SOCK}" >/dev/null 2>&1 || true
+        rm -f "${TMUX_SOCKET_DIR}/${SOCK}" >/dev/null 2>&1 || true
     fi
     for path in "${TEST_TMP_FILES[@]:-}"; do
         rm -f "$path" >/dev/null 2>&1 || true
@@ -48,13 +51,14 @@ sanitize_inherited_env() {
 
 # Stale sockets from run-alls killed before their trap ran. Only touch the
 # agent-test-* prefix, never the default socket; keep anything under 1h old
-# so a concurrently running suite is not nuked.
+# so a concurrently running suite is not nuked. Run from setup_test_server,
+# not at source time, so sourcing this lib has no side effects.
 sweep_stale_test_sockets() {
-    find "/tmp/tmux-$(id -u)" -maxdepth 1 -name 'agent-test-*' -type s -mmin +60 -exec rm -f {} + 2>/dev/null || true
+    find "${TMUX_SOCKET_DIR}" -maxdepth 1 -name 'agent-test-*' -type s -mmin +60 -exec rm -f {} + 2>/dev/null || true
 }
-sweep_stale_test_sockets
 
 setup_test_server() {
+    sweep_stale_test_sockets
     local name="${1:-test}"
     SOCK="agent-test-${name}-$$"
 
