@@ -25,6 +25,8 @@ register_tmp_file() {
 cleanup_test_server() {
     if [ -n "${SOCK:-}" ]; then
         tmux_cmd kill-server >/dev/null 2>&1 || true
+        # kill-server normally unlinks the socket; rm is the fallback.
+        rm -f "/tmp/tmux-$(id -u)/${SOCK}" >/dev/null 2>&1 || true
     fi
     for path in "${TEST_TMP_FILES[@]:-}"; do
         rm -f "$path" >/dev/null 2>&1 || true
@@ -34,11 +36,30 @@ cleanup_test_server() {
     rm -f /tmp/tmux-agent-indicator-"${SOCK}"-* 2>/dev/null || true
 }
 
+# A driver shell may carry TMUX_AGENT_* keys (opencode serve snapshots its
+# global env into descendants; gt-ef79/gt-2e1c). The test server copies the
+# first client's env into its global env, which turns env-sensitive asserts
+# red depending on driver lineage. Drop plugin keys server-side, once.
+sanitize_inherited_env() {
+    while IFS= read -r key; do
+        tmux_cmd set-environment -gu "$key" >/dev/null 2>&1 || true
+    done < <(tmux_cmd show-environment -g 2>/dev/null | grep -E '^TMUX_AGENT[^=]*=' | cut -d= -f1)
+}
+
+# Stale sockets from run-alls killed before their trap ran. Only touch the
+# agent-test-* prefix, never the default socket; keep anything under 1h old
+# so a concurrently running suite is not nuked.
+sweep_stale_test_sockets() {
+    find "/tmp/tmux-$(id -u)" -maxdepth 1 -name 'agent-test-*' -type s -mmin +60 -exec rm -f {} + 2>/dev/null || true
+}
+sweep_stale_test_sockets
+
 setup_test_server() {
     local name="${1:-test}"
     SOCK="agent-test-${name}-$$"
 
     tmux_cmd -f /dev/null new-session -d -s ai -n main
+    sanitize_inherited_env
     tmux_cmd set -g status-right '#{agent_indicator} | %H:%M'
     tmux_cmd run-shell "$REPO_ROOT/agent-indicator.tmux"
 
