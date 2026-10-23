@@ -737,6 +737,65 @@ check("default export: {id, setup} for the V2 loader",
         JSON.stringify(mainBatch));
 }
 
+// --- worktree sessions (__wt- directory) must not style panes (gt-a6ab) ------
+// Dispatched top-level sessions (parentID=None) spawn in the main repo, then
+// session_move into a __wt- worktree; a user pane sitting in that worktree
+// exact-matches the session directory, so only the __wt- predicate stops the
+// bind (gt-944f: a dispatch session styled the user's %1). Design ruling:
+// dispatched/background sessions never style panes.
+{
+    const wtDir = "/fixture/proj__wt-gt-a6ab__10232046";
+    writeFileSync(panesFile, `%1|opencode|${wtDir}\n%2|bash|/fixture/other\n`);
+    const readBindingsAt = (path) => {
+        try { return JSON.parse(readFileSync(path, "utf8")).bindings ?? {}; } catch { return {}; }
+    };
+    let gets = 0;
+    const wtSession = () => ({
+        get: async ({ sessionID }) => {
+            gets += 1;
+            return { id: sessionID, title: "T", location: { directory: wtDir } };
+        },
+        context: async () => [{ type: "assistant", content: [{ type: "text", text: "m" }] }],
+    });
+
+    // A. Worktree session whose directory EXACTLY matches pane %1: started +
+    //    succeeded produce ZERO agent-state calls — only the __wt- check can
+    //    stop the bind here (a routing mismatch would also pass this pin).
+    const wt = makePlugin({ session: wtSession() });
+    const aBatch = [
+        ...await wt.pump("session.execution.started", { sessionID: "wt1" }),
+        ...await wt.pump("session.execution.succeeded", { sessionID: "wt1" }),
+    ];
+    check("worktree: __wt- directory session events produce zero agent-state calls",
+        aBatch.length === 0, JSON.stringify(aBatch));
+    // Decision cached per sid: one fetch for routing (started), one for the
+    // succeeded title lookup; the second routing hit must reuse the cache.
+    await wt.pump("session.execution.started", { sessionID: "wt1" });
+    check("worktree: skip decision cached, one fetch per sid for routing",
+        gets === 2, `session.get calls=${gets}`);
+
+    // B. Polluted persisted binding (wt session -> %1 written through by an
+    //    earlier bug): the event must purge the disk entry AND style nothing.
+    const pollutedPath = join(fixtureDir, "bindings-polluted-wt.json");
+    writeFileSync(pollutedPath, JSON.stringify({ pid: "4242", bindings: { wt2: "%1" } }));
+    const dirty = makePlugin({ bindingsFile: pollutedPath, session: wtSession() });
+    const dirtyBatch = await dirty.pump("session.execution.succeeded", { sessionID: "wt2" });
+    check("worktree: polluted persisted binding produces no styling",
+        dirtyBatch.length === 0, JSON.stringify(dirtyBatch));
+    check("worktree: polluted binding purged from disk",
+        !("wt2" in readBindingsAt(pollutedPath)), readFileSync(pollutedPath, "utf8"));
+
+    // C. Normal session (no __wt-, no parentID): routing behavior unchanged —
+    //    guards against the worktree predicate being broadened by accident.
+    writeFileSync(panesFile, "%1|opencode|/fixture/proj\n%2|bash|/fixture/other\n");
+    const normal = makePlugin();
+    const normalBatch = await normal.pump("session.execution.started", { sessionID: "norm1" });
+    check("worktree: session without __wt- and without parentID still styles its pane",
+        JSON.stringify(states(normalBatch)) === JSON.stringify(["off", "running"])
+        && normalBatch.every((line) => line.env.TMUX_PANE === "%1"),
+        JSON.stringify(normalBatch));
+}
+
 if (failures.length > 0) {
     console.error(`FAIL: ${failures.length} assertion(s) failed:`);
     for (const f of failures) console.error(`  - ${f}`);

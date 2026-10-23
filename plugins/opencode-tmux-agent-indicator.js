@@ -44,7 +44,7 @@ export const setup = (ctx) => {
   const routeWarnedBySession = new Set(); // 已告警过路由失败的 session（成功路由即清除）
   const startedCount = new Map(); // sessionID -> execution.started 计数（在途执行判别）
   const succeededCount = new Map(); // sessionID -> execution.succeeded 计数
-  const childBySid = new Map(); // sessionID -> 是否子会话（parent 判定缓存：子代理事件风暴下不重复 API）
+  const childBySid = new Map(); // sessionID -> 是否跳过样式化（子会话或 __wt- 后台会话；判定缓存：事件风暴下不重复 API）
   const vettedBySid = new Map(); // sessionID -> 绑定校验通过（directory≡pane cwd；仅缓存通过，失败不缓存重试）
 
   // ---- session→pane 路由（2026-10-18 多目录多会话支持）----
@@ -132,16 +132,24 @@ export const setup = (ctx) => {
   });
   const resolvePaneForSession = async (sessionID) => {
     if (!sessionID) return null;
-    // 子会话判别必须先于 cached-binding 命中：subagent 继承父会话 directory，
-    // 全等匹配会误绑父 pane，且 gt-37eb 已把误绑写穿磁盘——污染条目也必须在
-    // 此失效（绑定命中前 return null）。V2 API 实测（2.1.2，2026-10-23）字段
-    // 名 parentID；兜底其余拼写变体，任一非空即子会话。fetch 结果留存供绑定
-    // 校验复用（gt-4ad7），后续事件 childBySid 命中即不重取。
+    // 跳过样式化判别必须先于 cached-binding 命中（误绑可能已写穿磁盘——
+    // gt-37eb，污染条目也必须在绑定命中前失效）：①subagent 继承父会话
+    // directory，全等匹配会误绑父 pane；②dispatch 派发的顶层会话
+    // （parentID 空）spawn 于主仓、session_move 进 __wt- worktree 后，用户
+    // pane 的 cwd 与其 directory 全等（gt-944f 实证误绑用户 %1）。两个判定
+    // 共用同一次 fetch、结果并入同一缓存，每 sid 仅判一次；fetch 结果留存
+    // 供绑定校验复用（gt-4ad7），后续事件 childBySid 命中即不重取。设计裁
+    // 定（2026-10-23）：派发/后台会话不样式化，pane 只反映用户交互的 TUI
+    // 会话。V2 API 实测（2.1.2，2026-10-23）字段名 parentID；兜底其余拼
+    // 写变体，任一非空即子会话；__wt- 判 worktree 铁律命名约定
+    // REPO__wt-TYPE-BRIEF__MMDDHHMM。
     let session = null;
     if (!childBySid.has(sessionID)) {
       try {
         session = await ctx.session.get({ sessionID });
-        childBySid.set(sessionID, Boolean(session?.parentID ?? session?.parent_id ?? session?.parentId));
+        const directory = session?.location?.directory || "";
+        childBySid.set(sessionID, Boolean(session?.parentID ?? session?.parent_id ?? session?.parentId)
+          || directory.includes("__wt-"));
       } catch { return null; } // 取不到会话＝directory 也无从解析；不缓存，下次事件重试
     }
     if (childBySid.get(sessionID)) {
