@@ -5,8 +5,9 @@
 // run on V2. Tracks session state and calls agent-state.sh to update tmux
 // pane visuals.
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { dirname } from "node:path";
 
 // Resolve the V2 plugin helper when running inside OpenCode; fall back to an
 // identity shim so the module also loads under plain Node (tests, syntax
@@ -47,7 +48,59 @@ export const setup = (ctx) => {
   // session.location.directory ↔ pane cwd 匹配：每个 opencode pane 的状态只写
   // 自己的 pane（经 TMUX_PANE 优先通道），多目录并发会话互不串扰；顺带清理
   // 死 pane 的注册/状态键。
+  // ---- sessionID→paneId 绑定持久化（抗插件实例重载）----
+  // 实例 ~15-30min 周期重载清空内存 Map，重载后仅剩 directory 全等匹配，
+  // session_move/目录删除场景永久失配（pane 卡死旧状态）。绑定写穿 JSON 文件
+  // {pid, bindings}：写临时文件+rename（POSIX 原子，读者永不见半截文件）。
+  // 多实例并发：读-合并-写，防断流 gap 内漏事件的陈旧实例整文件覆写抹掉他
+  // 实例的新鲜绑定；残余——陈旧实例仍可能以旧值覆盖同键，paneAlive 失败即
+  // 重绑，上界同持久化前行为。/tmp OS 重启即失可接受——要活过的是重载。
+  // 文件带 tmux server pid：pane id 按 server 生命周期分配且复用，server 重启
+  // 后「新 %1」可能是别家 pane 而 paneAlive 照样放行——pid 不匹配即全弃。
+  const bindingsFile = process.env.TMUX_AGENT_INDICATOR_BINDINGS_FILE
+    || "/tmp/opencode/tmux-agent-indicator-bindings.json";
+  // server pid 实例生命周期内恒定；拿不到（无 tmux）＝不加载，落盘 stamp null
+  // ＝下个实例照样弃（安全方向）。
+  const serverPid = (() => {
+    try { return execFileSync("tmux", ["display-message", "-p", "#{pid}"]).toString().trim() || null; }
+    catch { return null; }
+  })();
+  const loadBindings = (pid) => {
+    try {
+      const raw = JSON.parse(fs.readFileSync(bindingsFile, "utf8"));
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+      if (!raw.pid || !pid || raw.pid !== pid) {
+        if (raw.bindings && typeof raw.bindings === "object" && Object.keys(raw.bindings).length > 0) {
+          dbg(`bindings ignored: server pid ${pid} != file pid ${raw.pid}`);
+        }
+        return [];
+      }
+      const b = raw.bindings;
+      if (!b || typeof b !== "object" || Array.isArray(b)) return [];
+      // 值必须是 tmux pane id 形（%N）：磁盘面在 /tmp，格式闸封死垃圾值下游。
+      return Object.entries(b).filter(([k, v]) => k && typeof v === "string" && /^%\d+$/.test(v));
+    } catch { return []; }
+  };
+  const persistBindings = (map, deletedKey) => {
+    // 读-合并-写：以磁盘 pid 校验后的条目为底，并入本实例视图与显式删除项。
+    try {
+      fs.mkdirSync(dirname(bindingsFile), { recursive: true });
+      const merged = new Map(loadBindings(serverPid));
+      for (const [k, v] of map) merged.set(k, v);
+      if (deletedKey !== undefined) merged.delete(deletedKey);
+      // kill 于 write/rename 之间残留 *.tmp：微秒窗×数百字节，无清理亦无碍正确性。
+      const tmp = `${bindingsFile}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify({ pid: serverPid, bindings: Object.fromEntries(merged) }));
+      fs.renameSync(tmp, bindingsFile);
+    } catch (error) { dbg(`persist bindings failed: ${error?.message ?? error}`); }
+  };
+
   const sessionPane = new Map(); // sessionID -> pane_id
+  // 重载恢复：setup 时把历史绑定灌回内存；fromDisk 记录来自文件的会话，其
+  // 首次命中路由时 dbg 一条（生产验证钩子：确认持久化真的在救事件）。
+  const fromDisk = new Set();
+  for (const [k, v] of loadBindings(serverPid)) { sessionPane.set(k, v); fromDisk.add(k); }
+  if (sessionPane.size > 0) dbg(`loaded ${sessionPane.size} bindings from ${bindingsFile}`);
   const listAgentPanes = () => new Promise((resolve) => {
     execFile("tmux", ["list-panes", "-a", "-F", "#{pane_id}|#{pane_current_command}|#{pane_current_path}"],
       (err, stdout) => resolve(err ? [] : String(stdout).split("\n").filter(Boolean)));
@@ -73,8 +126,13 @@ export const setup = (ctx) => {
   const resolvePaneForSession = async (sessionID) => {
     if (!sessionID) return null;
     const cached = sessionPane.get(sessionID);
-    if (cached && (await paneAlive(cached))) return cached;
-    sessionPane.delete(sessionID);
+    if (cached && (await paneAlive(cached))) {
+      if (fromDisk.delete(sessionID)) dbg(`routed ${sessionID.slice(0, 12)} via persisted binding ${cached}`);
+      return cached;
+    }
+    // 失效同步删除（显式 deletedKey，防合并时文件旧条目复活）：Map.delete 为
+    // 真才写穿，避免无绑定事件反复重写文件。
+    if (sessionPane.delete(sessionID)) persistBindings(sessionPane, sessionID);
     let directory = "";
     try {
       const session = await ctx.session.get({ sessionID });
@@ -90,7 +148,11 @@ export const setup = (ctx) => {
       // 全等匹配：前缀匹配会把子目录里的外来子会话路由到祖先 pane。
       if (ppath === directory) { matched = paneId; break; }
     }
-    if (matched) sessionPane.set(sessionID, matched);
+    if (matched) {
+      sessionPane.set(sessionID, matched);
+      fromDisk.delete(sessionID); // directory 匹配自愈的绑定不再是「来自文件」
+      persistBindings(sessionPane);
+    }
     return matched;
   };
 

@@ -47,6 +47,9 @@ writeFileSync(join(fixtureDir, "tmux"), `#!/usr/bin/env bash
 case "\$1" in
     list-panes) cat "\$TMUX_FIXTURE_PANES" ;;
     display-message)
+        for a in "\$@"; do
+            [ "\$a" = "#{pid}" ] && { echo "4242"; exit 0; }
+        done
         target=""
         prev=""
         for a in "\$@"; do
@@ -126,6 +129,11 @@ const makePlugin = (overrides = {}) => {
     const capture = join(fixtureDir, `capture-${instanceSeq++}.jsonl`);
     writeFileSync(capture, "");
     process.env.TMUX_AGENT_INDICATOR_CAPTURE = capture;
+    // Per-instance bindings file: isolates persistence tests from each other
+    // and from the live /tmp/opencode file. overrides.bindingsFile shares one
+    // file across instances (reload round-trip).
+    process.env.TMUX_AGENT_INDICATOR_BINDINGS_FILE = overrides.bindingsFile
+        ?? join(fixtureDir, `bindings-${instanceSeq - 1}.json`);
     const bus = makeBus();
     const cleanup = pluginSetup({
         session: makeSessionStub(overrides.session),
@@ -535,6 +543,72 @@ check("default export: {id, setup} for the V2 loader",
         batch.length === 1 && argState(batch[0]) === "needs-input"
         && batch[0].env.TMUX_PANE === process.env.TMUX_PANE,
         JSON.stringify(batch));
+}
+
+// --- binding persistence: survive plugin instance reload ---------------------
+{
+    writeFileSync(panesFile, "%1|opencode|/fixture/proj\n%2|bash|/fixture/other\n");
+    const bindingsPath = join(fixtureDir, "bindings-roundtrip.json");
+    // Corrupt seed doubles as the tolerant-read case: instance A must boot
+    // and bind normally, overwriting the garbage.
+    writeFileSync(bindingsPath, "{corrupt");
+    const readBindings = () => {
+        try { return JSON.parse(readFileSync(bindingsPath, "utf8")).bindings ?? {}; } catch { return {}; }
+    };
+
+    // Instance A: binds sX -> %1 via directory match; the binding must be
+    // written through to the bindings file.
+    const a = makePlugin({ bindingsFile: bindingsPath });
+    const bindBatch = await a.pump("session.execution.started", { sessionID: "sX" });
+    check("persist: corrupt bindings file tolerated, instance A binds normally",
+        bindBatch.length === 2 && bindBatch.every((line) => line.env.TMUX_PANE === "%1"),
+        JSON.stringify(bindBatch));
+    check("persist: binding write-through lands in file",
+        readBindings().sX === "%1", readFileSync(bindingsPath, "utf8"));
+
+    // Simulated reload: a fresh instance whose in-memory Map starts empty;
+    // the session directory deliberately no longer matches pane %1's cwd, so
+    // directory matching cannot rescue routing — only the persisted binding
+    // can.
+    const b = makePlugin({
+        bindingsFile: bindingsPath,
+        session: {
+            get: async ({ sessionID }) => ({ id: sessionID, title: "T", location: { directory: "/fixture/moved-away" } }),
+            context: async () => [{ type: "assistant", content: [{ type: "text", text: "m" }] }],
+        },
+    });
+    const reloadBatch = await b.pump("session.execution.started", { sessionID: "sX" });
+    check("persist: reloaded instance routes via file binding despite directory mismatch",
+        reloadBatch.length === 2 && reloadBatch.every((line) => line.env.TMUX_PANE === "%1"),
+        JSON.stringify(reloadBatch));
+
+    // Invalidation: the bound pane disappears; the next event must drop the
+    // binding from memory AND from the file.
+    writeFileSync(panesFile, "%2|bash|/fixture/other\n");
+    const deadBatch = await b.pump("permission.asked", { sessionID: "sX", action: "bash", resources: [] });
+    check("persist: dead-pane event dropped", deadBatch.length === 0,
+        JSON.stringify(deadBatch));
+    check("persist: dead-pane binding removed from file",
+        !("sX" in readBindings()), readFileSync(bindingsPath, "utf8"));
+}
+
+{
+    // Simulated tmux server restart: pane ids are server-lifetime-scoped and
+    // reused, so bindings stamped with a previous server pid must be fully
+    // discarded on load (paneAlive cannot tell the "new %1" from the old one).
+    writeFileSync(panesFile, "%1|opencode|/fixture/proj\n%2|bash|/fixture/other\n");
+    const restartPath = join(fixtureDir, "bindings-restart.json");
+    writeFileSync(restartPath, JSON.stringify({ pid: "9999", bindings: { sR: "%1" } }));
+    const c = makePlugin({
+        bindingsFile: restartPath,
+        session: {
+            get: async ({ sessionID }) => ({ id: sessionID, title: "T", location: { directory: "/fixture/moved-away" } }),
+            context: async () => [{ type: "assistant", content: [{ type: "text", text: "m" }] }],
+        },
+    });
+    const staleBatch = await c.pump("session.execution.started", { sessionID: "sR" });
+    check("persist: bindings from a dead tmux server pid are discarded on load",
+        staleBatch.length === 0, JSON.stringify(staleBatch));
 }
 
 if (failures.length > 0) {
