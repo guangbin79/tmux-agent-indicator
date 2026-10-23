@@ -51,12 +51,15 @@ case "\$1" in
             [ "\$a" = "#{pid}" ] && { echo "4242"; exit 0; }
         done
         target=""
+        fmt=""
         prev=""
         for a in "\$@"; do
             [ "\$prev" = "-t" ] && target="\$a"
+            case "\$a" in "#{"*) fmt="\$a" ;; esac
             prev="\$a"
         done
-        grep -q "^\${target}|" "\$TMUX_FIXTURE_PANES" && echo "\$target"
+        line=\$(grep "^\${target}|" "\$TMUX_FIXTURE_PANES") || exit 1
+        if [ "\$fmt" = "#{pane_current_path}" ]; then echo "\${line##*|}"; else echo "\$target"; fi
         ;;
     *) ;;
 esac
@@ -587,10 +590,13 @@ check("default export: {id, setup} for the V2 loader",
     check("persist: binding write-through lands in file",
         readBindings().sX === "%1", readFileSync(bindingsPath, "utf8"));
 
-    // Simulated reload: a fresh instance whose in-memory Map starts empty;
-    // the session directory deliberately no longer matches pane %1's cwd, so
-    // directory matching cannot rescue routing — only the persisted binding
-    // can.
+    // gt-4ad7 (a): stale binding — the session moved away (session_move to a
+    // worktree) after the binding was written, so session.directory no longer
+    // equals the bound pane's cwd while paneAlive (the user pane) still
+    // passes. First-event revalidation must style NOTHING and purge the
+    // binding from memory AND from the file. (This replaces the old semantic
+    // "persisted binding rescues routing despite directory mismatch" — that
+    // rescue is exactly the stale-binding immortality gt-4ad7 fixes.)
     const b = makePlugin({
         bindingsFile: bindingsPath,
         session: {
@@ -598,19 +604,62 @@ check("default export: {id, setup} for the V2 loader",
             context: async () => [{ type: "assistant", content: [{ type: "text", text: "m" }] }],
         },
     });
-    const reloadBatch = await b.pump("session.execution.started", { sessionID: "sX" });
-    check("persist: reloaded instance routes via file binding despite directory mismatch",
-        reloadBatch.length === 2 && reloadBatch.every((line) => line.env.TMUX_PANE === "%1"),
-        JSON.stringify(reloadBatch));
-
-    // Invalidation: the bound pane disappears; the next event must drop the
-    // binding from memory AND from the file.
-    writeFileSync(panesFile, "%2|bash|/fixture/other\n");
-    const deadBatch = await b.pump("permission.asked", { sessionID: "sX", action: "bash", resources: [] });
-    check("persist: dead-pane event dropped", deadBatch.length === 0,
-        JSON.stringify(deadBatch));
-    check("persist: dead-pane binding removed from file",
+    const staleBatch = [
+        ...await b.pump("session.execution.started", { sessionID: "sX" }),
+        ...await b.pump("session.execution.succeeded", { sessionID: "sX" }),
+    ];
+    check("gt-4ad7a: stale binding (directory != pane cwd) styles nothing",
+        staleBatch.length === 0, JSON.stringify(staleBatch));
+    check("gt-4ad7a: stale binding purged from file",
         !("sX" in readBindings()), readFileSync(bindingsPath, "utf8"));
+
+    // gt-4ad7 (c): pane-death invalidation semantics unchanged — a VALID
+    // binding (directory == pane cwd, vetted) whose pane disappears still
+    // purges on the next event.
+    const c = makePlugin({ bindingsFile: bindingsPath });
+    const cBind = await c.pump("session.execution.started", { sessionID: "sZ" });
+    check("gt-4ad7c: valid bind routes normally before pane death",
+        cBind.length === 2 && cBind.every((line) => line.env.TMUX_PANE === "%1"),
+        JSON.stringify(cBind));
+    writeFileSync(panesFile, "%2|bash|/fixture/other\n");
+    const deadBatch = await c.pump("permission.asked", { sessionID: "sZ", action: "bash", resources: [] });
+    check("gt-4ad7c: dead-pane event dropped", deadBatch.length === 0,
+        JSON.stringify(deadBatch));
+    check("gt-4ad7c: dead-pane binding removed from file",
+        !("sZ" in readBindings()), readFileSync(bindingsPath, "utf8"));
+}
+
+{
+    // gt-4ad7 (b): directory === pane cwd — cached routing is unchanged, and
+    // the session fetch + cwd probe run only on the sid's FIRST event
+    // (vettedBySid short-circuit; paneAlive stays per-event).
+    writeFileSync(panesFile, "%1|opencode|/fixture/proj\n%2|bash|/fixture/other\n");
+    const okPath = join(fixtureDir, "bindings-vetted.json");
+    writeFileSync(okPath, JSON.stringify({ pid: "4242", bindings: { ses_y: "%1" } }));
+    let getCalls = 0;
+    const p = makePlugin({
+        bindingsFile: okPath,
+        session: {
+            get: async ({ sessionID }) => {
+                getCalls += 1;
+                return { id: sessionID, title: "T", location: { directory: "/fixture/proj" } };
+            },
+            context: async () => [{ type: "assistant", content: [{ type: "text", text: "m" }] }],
+        },
+    });
+    const batch1 = await p.pump("session.execution.started", { sessionID: "ses_y" });
+    // interrupted carries no title/message resolution, so any get() beyond
+    // the first could only come from re-fetching to route — the count pins
+    // the once-per-sid cost contract.
+    const batch2 = await p.pump("session.execution.interrupted", { sessionID: "ses_y" });
+    check("gt-4ad7b: validated binding routes first event via pane",
+        JSON.stringify(states(batch1)) === JSON.stringify(["off", "running"])
+        && batch1.every((line) => line.env.TMUX_PANE === "%1"),
+        JSON.stringify(batch1));
+    check("gt-4ad7b: second event routes via cache without re-fetch",
+        batch2.length === 1 && argState(batch2[0]) === "off"
+        && batch2[0].env.TMUX_PANE === "%1" && getCalls === 1,
+        JSON.stringify({ batch2, getCalls }));
 }
 
 {

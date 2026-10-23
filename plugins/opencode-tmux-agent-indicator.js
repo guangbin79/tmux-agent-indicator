@@ -45,6 +45,7 @@ export const setup = (ctx) => {
   const startedCount = new Map(); // sessionID -> execution.started 计数（在途执行判别）
   const succeededCount = new Map(); // sessionID -> execution.succeeded 计数
   const childBySid = new Map(); // sessionID -> 是否子会话（parent 判定缓存：子代理事件风暴下不重复 API）
+  const vettedBySid = new Map(); // sessionID -> 绑定校验通过（directory≡pane cwd；仅缓存通过，失败不缓存重试）
 
   // ---- session→pane 路由（2026-10-18 多目录多会话支持）----
   // session.location.directory ↔ pane cwd 匹配：每个 opencode pane 的状态只写
@@ -111,6 +112,10 @@ export const setup = (ctx) => {
     execFile("tmux", ["display-message", "-p", "-t", paneId, "#{pane_id}"],
       (err, stdout) => resolve(!err && String(stdout).trim() === paneId));
   });
+  const paneCwd = (paneId) => new Promise((resolve) => {
+    execFile("tmux", ["display-message", "-p", "-t", paneId, "#{pane_current_path}"],
+      (err, stdout) => resolve(err ? null : String(stdout).trim() || null));
+  });
   const prunePaneKeys = (livePanes) => new Promise((resolve) => {
     execFile("tmux", ["show-environment", "-g"], (err, stdout) => {
       if (err) return resolve();
@@ -130,10 +135,12 @@ export const setup = (ctx) => {
     // 子会话判别必须先于 cached-binding 命中：subagent 继承父会话 directory，
     // 全等匹配会误绑父 pane，且 gt-37eb 已把误绑写穿磁盘——污染条目也必须在
     // 此失效（绑定命中前 return null）。V2 API 实测（2.1.2，2026-10-23）字段
-    // 名 parentID；兜底其余拼写变体，任一非空即子会话。
+    // 名 parentID；兜底其余拼写变体，任一非空即子会话。fetch 结果留存供绑定
+    // 校验复用（gt-4ad7），后续事件 childBySid 命中即不重取。
+    let session = null;
     if (!childBySid.has(sessionID)) {
       try {
-        const session = await ctx.session.get({ sessionID });
+        session = await ctx.session.get({ sessionID });
         childBySid.set(sessionID, Boolean(session?.parentID ?? session?.parent_id ?? session?.parentId));
       } catch { return null; } // 取不到会话＝directory 也无从解析；不缓存，下次事件重试
     }
@@ -144,15 +151,30 @@ export const setup = (ctx) => {
     }
     const cached = sessionPane.get(sessionID);
     if (cached && (await paneAlive(cached))) {
-      if (fromDisk.delete(sessionID)) dbg(`routed ${sessionID.slice(0, 12)} via persisted binding ${cached}`);
-      return cached;
+      // gt-4ad7：绑定只在 directory≡pane cwd 校验通过后可信（vettedBySid
+      // childBySid 同款语义：每 sid 仅首事件做 fetch＋cwd 探测，失败不缓存）。
+      // dispatch 子会话 spawn 瞬间 directory=主仓与用户 pane cwd 巧合全等被
+      // 绑定，session_move 进 worktree 后绑定陈旧——paneAlive（用户 pane）
+      // 恒通过曾使其永生并持续样式化用户 pane（蓝冲红/空闲挂红）。
+      if (vettedBySid.get(sessionID)) {
+        if (fromDisk.delete(sessionID)) dbg(`routed ${sessionID.slice(0, 12)} via persisted binding ${cached}`);
+        return cached;
+      }
+      const cwd = await paneCwd(cached);
+      if (cwd !== null && cwd === (session?.location?.directory || "")) {
+        vettedBySid.set(sessionID, true);
+        if (fromDisk.delete(sessionID)) dbg(`routed ${sessionID.slice(0, 12)} via persisted binding ${cached}`);
+        return cached;
+      }
+      // cwd 探测失败＝pane 已死，落 paneAlive 失效路径；directory 不符＝陈旧
+      // 绑定：解绑后落 directory 全等匹配（大概率无匹配 → route failed 留痕）。
     }
     // 失效同步删除（显式 deletedKey，防合并时文件旧条目复活）：Map.delete 为
     // 真才写穿，避免无绑定事件反复重写文件。
     if (sessionPane.delete(sessionID)) persistBindings(sessionPane, sessionID);
     let directory = "";
     try {
-      const session = await ctx.session.get({ sessionID });
+      if (!session) session = await ctx.session.get({ sessionID });
       directory = session?.location?.directory || "";
     } catch { return null; }
     if (!directory) return null;
@@ -167,6 +189,7 @@ export const setup = (ctx) => {
     }
     if (matched) {
       sessionPane.set(sessionID, matched);
+      vettedBySid.set(sessionID, true); // directory 全等命中＝校验由构造保证
       fromDisk.delete(sessionID); // directory 匹配自愈的绑定不再是「来自文件」
       persistBindings(sessionPane);
     }
