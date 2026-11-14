@@ -13,3 +13,8 @@
 ## 泄漏 socket 清扫约定
 - 只清 `agent-test-*` 前缀、`-type s`、mtime>1h（防误杀并发套件）；永不碰 `default`。
 - sweep 挂在 `setup_test_server` 首行而非 source 时——lib 被 source 必须零副作用。
+
+## Bug 教训：PATH 隔离 fake bin 必须完备，防 tmux 错误文本伪正文（ag-1380c5）
+- fake sendmail 用 cat 写捕获，cat 就必须一并链入隔离 PATH：缺任一二进制 → notify-email 127 退出，且 `tmux run-shell` 会把 `'<cmd>' returned 127` 打进客户端 stdout，被 `$(...)` 误当邮件正文——`[ -z "$body" ]` 假绿，头断言才暴露。
+- 判别法：捕获"正文"以 `'PATH=` 开头即为 job 错误文本泄漏，先查 fake bin 完备性再查产品码。
+- 回归钉：tests/test-email-body.sh Test 22（链入清单 bash tmux sed grep base64 date cat 与四头断言同钉）。
