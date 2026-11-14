@@ -98,9 +98,14 @@ send_email() {
         return 0
     fi
     if command -v sendmail >/dev/null 2>&1; then
+        # Full MIME headers: without them clients guess the charset and may
+        # render UTF-8 as latin1 mojibake (ag-6b081f root cause).
         {
             echo "Subject: ${subject_enc}"
+            echo "From: ${email_to}"
             echo "To: ${email_to}"
+            echo "Date: $(date -R)"
+            echo "MIME-Version: 1.0"
             echo "Content-Type: text/plain; charset=UTF-8"
             echo ""
             echo "$body"

@@ -215,4 +215,69 @@ if ! grep -qF '配置完成' <<< "$body"; then
 fi
 tmux_cmd set -gu '@agent-indicator-email-exclude-title-regex'
 
-pass "email body replacement, fallback, truncation, and CJK/DND behavior"
+# Test 22 (ag-1380c5): sendmail fallback emits the full MIME header block —
+# run notify-email.sh with a PATH that offers only a fake sendmail (no mail
+# binary reachable), capture what sendmail receives, and assert all four
+# headers survive so clients never guess latin1 (mojibake root cause).
+sendmail_capture() {
+    local state="$1"
+    local message="$2"
+    local capture_file="/tmp/tmux-agent-indicator-${SOCK}-sendmail-${RANDOM}.txt"
+    local fake_bin="/tmp/tmux-agent-indicator-${SOCK}-sendbin-${RANDOM}"
+    register_tmp_file "$capture_file"
+
+    mkdir -p "$fake_bin"
+    # cat must be linked too: the fake sendmail writes via cat, and any
+    # missing binary in the isolated PATH kills the script (127) — tmux then
+    # prints the job error into this function's stdout, faking a body.
+    for cmd_name in bash tmux sed grep base64 date cat; do
+        ln -s "$(command -v "$cmd_name")" "$fake_bin/$cmd_name"
+    done
+    printf '#!/usr/bin/env bash\ncat > "$SENDMAIL_CAPTURE"\n' > "$fake_bin/sendmail"
+    chmod +x "$fake_bin/sendmail"
+
+    # No email-command, no reachable mail: force the sendmail fallback branch.
+    tmux_cmd set -gu '@agent-indicator-email-command'
+    tmux_cmd set -g @agent-indicator-email-to 'fallback@example.com'
+    tmux_cmd set -g @agent-indicator-email-needs-input-throttle '0'
+
+    tmux_cmd run-shell \
+        "PATH='$fake_bin' SENDMAIL_CAPTURE='$capture_file' \
+         OPENCODE_LAST_MESSAGE='$message' \
+         AGENT_NAME='opencode' \
+         AGENT_STATE='$state' \
+         AGENT_SESSION='ai' \
+         \"$ROOT_DIR/scripts/notify-email.sh\""
+
+    sleep 0.3
+    rm -rf "$fake_bin"
+    cat "$capture_file" 2>/dev/null || true
+}
+
+body="$(sendmail_capture 'needs-input' 'sendmail fallback body')"
+if [ -z "$body" ]; then
+    fail "sendmail fallback should capture the message via fake sendmail"
+fi
+if ! grep -q '^Subject: ' <<< "$body"; then
+    fail "sendmail fallback should keep the Subject header"
+fi
+if ! grep -q '^From: fallback@example.com$' <<< "$body"; then
+    fail "sendmail fallback should carry From header (sender = email_to)"
+fi
+if ! grep -q '^To: fallback@example.com$' <<< "$body"; then
+    fail "sendmail fallback should keep the To header"
+fi
+if ! grep -Eq '^Date: [A-Za-z]{3}, [0-9]{2} [A-Za-z]{3} [0-9]{4} [0-9:]{8} [+-][0-9]{4}$' <<< "$body"; then
+    fail "sendmail fallback should carry an RFC 2822 Date header (date -R): $(grep '^Date:' <<< "$body")"
+fi
+if ! grep -q '^MIME-Version: 1.0$' <<< "$body"; then
+    fail "sendmail fallback should carry MIME-Version: 1.0"
+fi
+if ! grep -q '^Content-Type: text/plain; charset=UTF-8$' <<< "$body"; then
+    fail "sendmail fallback should carry Content-Type: text/plain; charset=UTF-8"
+fi
+if ! grep -q '^sendmail fallback body$' <<< "$body"; then
+    fail "sendmail fallback body should arrive verbatim after the header block"
+fi
+
+pass "email body replacement, fallback, truncation, CJK/DND, and sendmail MIME fallback"
