@@ -250,10 +250,12 @@ sendmail_capture() {
          AGENT_SESSION='ai' \
          \"$ROOT_DIR/scripts/notify-email.sh\""
 
-    # Poll for the capture: run-shell jobs are async; deleting fake_bin on a
-    # fixed timer can race the job spawn and 127 the script mid-flight.
+    # Poll until the trailer line lands: run-shell jobs are async; deleting
+    # fake_bin on a fixed timer can race the job spawn and 127 the script
+    # mid-flight, and first-byte (non-empty) is not "capture complete".
     local waited=0
-    until [ -s "$capture_file" ] || [ "$waited" -ge 50 ]; do
+    until grep -qF -- "$message" "$capture_file" 2>/dev/null \
+          || [ "$waited" -ge 50 ]; do
         sleep 0.1
         waited=$((waited + 1))
     done
