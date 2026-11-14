@@ -40,13 +40,16 @@ cleanup_test_server() {
 }
 
 # A driver shell may carry TMUX_AGENT_* keys (opencode serve snapshots its
-# global env into descendants; gt-ef79/gt-2e1c). The test server copies the
-# first client's env into its global env, which turns env-sensitive asserts
-# red depending on driver lineage. Drop plugin keys server-side, once.
+# global env into descendants; gt-ef79/gt-2e1c) or OPENCODE_* keys (daemon
+# dispatch shells export session titles — one matching the DND exclude
+# regex silently suppresses expected emails, ag-6b081f). The test server
+# copies the first client's env into its global env, which turns
+# env-sensitive asserts red depending on driver lineage. Drop both key
+# families server-side, once.
 sanitize_inherited_env() {
     while IFS= read -r key; do
         tmux_cmd set-environment -gu "$key" >/dev/null 2>&1 || true
-    done < <(tmux_cmd show-environment -g 2>/dev/null | grep -E '^TMUX_AGENT[^=]*=' | cut -d= -f1)
+    done < <(tmux_cmd show-environment -g 2>/dev/null | grep -E '^(TMUX_AGENT|OPENCODE)[^=]*=' | cut -d= -f1)
 }
 
 # Stale sockets from run-alls killed before their trap ran. Only touch the

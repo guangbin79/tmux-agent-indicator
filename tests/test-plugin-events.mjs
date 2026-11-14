@@ -796,6 +796,24 @@ check("default export: {id, setup} for the V2 loader",
         JSON.stringify(normalBatch));
 }
 
+{
+    // ag-6b081f: Chinese last assistant message must reach the agent-state.sh
+    // env byte-exact — the execFile env hop never re-encodes UTF-8 (配置
+    // stays 配置, never the double-encoded é…ç½® form).
+    writeFileSync(panesFile, "%1|opencode|/fixture/proj\n%2|bash|/fixture/other\n");
+    const zh = "配置完成：静等终态。";
+    const p = makePlugin({
+        session: {
+            context: async () => [{ type: "assistant", content: [{ type: "text", text: zh }] }],
+        },
+    });
+    await p.pump("session.execution.succeeded", { sessionID: "s1" });
+    const batch = p.lines();
+    check("chinese last message: byte-exact through the env hop",
+        batch.length === 1 && batch[0].env.OPENCODE_LAST_MESSAGE === zh,
+        JSON.stringify(batch));
+}
+
 if (failures.length > 0) {
     console.error(`FAIL: ${failures.length} assertion(s) failed:`);
     for (const f of failures) console.error(`  - ${f}`);

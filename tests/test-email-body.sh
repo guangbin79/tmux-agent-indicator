@@ -15,6 +15,7 @@ capture_email_body() {
     local state="$1"
     local message="$2"
     local detail="${3:-}"
+    local title="${4:-}"
     local capture_file="/tmp/tmux-agent-indicator-${SOCK}-email-${RANDOM}.txt"
     register_tmp_file "$capture_file"
 
@@ -29,6 +30,7 @@ capture_email_body() {
     tmux_cmd run-shell \
         "OPENCODE_STATE_DETAIL='$detail' \
          OPENCODE_LAST_MESSAGE='$message' \
+         OPENCODE_SESSION_TITLE='$title' \
          AGENT_NAME='opencode' \
          AGENT_STATE='$state' \
          AGENT_SESSION='ai' \
@@ -151,4 +153,66 @@ fi
 
 # T3g: done without detail keeps current behavior (covered by Tests 3/4 above).
 
-pass "email body replacement, fallback, and truncation"
+# Test 15 (ag-6b081f): Chinese last message survives the chain byte-exact —
+# the captured body must contain the UTF-8 bytes of 配置完成 (e9 85 8d ...),
+# never the double-encoded mojibake form é…ç½®.
+body="$(capture_email_body 'needs-input' '配置完成：静等终态。' '')"
+if ! grep -qF "$(printf '\xe9\x85\x8d\xe7\xbd\xae\xe5\xae\x8c\xe6\x88\x90')" <<< "$body"; then
+    fail "Chinese OPENCODE_LAST_MESSAGE bytes corrupted in chain (配置完成 must arrive as e9 85 8d e7 bd ae e5 ae 8c e6 88 90)"
+fi
+if grep -qF "$(printf '\xc3\xa9\xc2\x85\xc2\x8d\xc3\xa7\xc2\xbd\xc2\xae')" <<< "$body"; then
+    fail "Chinese body shows double-encoded mojibake form (UTF-8 bytes of 配置 read as latin1 and re-encoded)"
+fi
+
+# Tests 16-19 (ag-6b081f): daemon headless session email DND — sessions whose
+# title matches @agent-indicator-email-exclude-title-regex never send
+# done/needs-input email.
+dnd_capture() {
+    capture_email_body "$1" '配置完成：静等终态。' '' "$2"
+}
+
+# Test 16: default regex excludes issue-agent router sessions (done).
+body="$(dnd_capture 'done' 'issue-agent router <hxnativeapp>')"
+if [ -n "$body" ]; then
+    fail "excluded title must not send done email (got body: $body)"
+fi
+
+# Test 17: default regex also suppresses needs-input for excluded titles.
+body="$(dnd_capture 'needs-input' 'issue-agent router <hxnativeapp>')"
+if [ -n "$body" ]; then
+    fail "excluded title must not send needs-input email (got body: $body)"
+fi
+
+# Test 18: non-matching titles still email (no overmatch).
+body="$(dnd_capture 'done' 'ag-123: 正常任务收尾')"
+if ! grep -qF '配置完成' <<< "$body"; then
+    fail "non-excluded title must still send done email with Chinese body"
+fi
+
+# Test 19: user-extendable regex.
+tmux_cmd set -g @agent-indicator-email-exclude-title-regex '^plaza-'
+body="$(dnd_capture 'done' 'plaza-watchdog')"
+if [ -n "$body" ]; then
+    fail "custom exclude regex must suppress matching title"
+fi
+body="$(dnd_capture 'done' 'issue-agent router <hxnativeapp>')"
+if ! grep -qF '配置完成' <<< "$body"; then
+    fail "custom exclude regex replaces default (issue-agent no longer matches)"
+fi
+
+# Test 20: invalid regex fails open — email still sends (grep error != match).
+tmux_cmd set -g @agent-indicator-email-exclude-title-regex '['
+body="$(dnd_capture 'done' 'issue-agent router <hxnativeapp>')"
+if ! grep -qF '配置完成' <<< "$body"; then
+    fail "invalid exclude regex must not suppress email (fail open)"
+fi
+
+# Test 21: match-nothing pattern disables the filter.
+tmux_cmd set -g @agent-indicator-email-exclude-title-regex '$^'
+body="$(dnd_capture 'done' 'issue-agent router <hxnativeapp>')"
+if ! grep -qF '配置完成' <<< "$body"; then
+    fail "match-nothing regex '\$^' must disable exclusion"
+fi
+tmux_cmd set -gu '@agent-indicator-email-exclude-title-regex'
+
+pass "email body replacement, fallback, truncation, and CJK/DND behavior"

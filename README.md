@@ -353,9 +353,12 @@ set -g @agent-indicator-email-command ''                                 # optio
 set -g @agent-indicator-email-needs-input-enabled 'on'                   # optional, enable needs-input emails (default: on)
 set -g @agent-indicator-email-needs-input-throttle '30'                  # optional, needs-input throttle window in seconds (default: 30)
 set -g @agent-indicator-email-body-limit '2000'                          # optional, max chars of OpenCode last assistant message in body (default: 2000)
+set -g @agent-indicator-email-exclude-title-regex '^issue-agent'         # optional, do-not-disturb: titles matching this POSIX ERE never email done/needs-input (default: ^issue-agent)
 ```
 
 Subject prefixes distinguish the two: session-complete emails start with `[oc-done]`, needs-input emails with `[oc-need_input]`. Subjects and bodies are session-oriented, e.g. `[oc-done] <session title>` / `Session <name> complete: all agents done at ...` and `[oc-need_input] <session title>` / `Session <name>: agent <name> needs input at ...`.
+
+**Daemon do-not-disturb:** sessions whose title matches `@agent-indicator-email-exclude-title-regex` (default `^issue-agent`) never trigger done/needs-input emails. Persistent daemon routers (headless sessions owned by a background `opencode serve`) complete turns constantly; their completion mail is noise, not signal. Set the option to replace the pattern, or to a match-nothing pattern such as `'$^'` to disable the filter. Bodies and subjects are passed through byte-exact as UTF-8 at every hop of the notify chain (asserted by regression tests).
 
 ## Custom Agent Integration
 

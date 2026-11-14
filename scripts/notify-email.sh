@@ -12,6 +12,10 @@
 #   @agent-indicator-email-command - custom send command, receives body on stdin
 #   @agent-indicator-email-needs-input-enabled  - on/off (default: on)
 #   @agent-indicator-email-needs-input-throttle - seconds (default: 30)
+#   @agent-indicator-email-exclude-title-regex - skip done/needs-input email
+#                          when the session title matches (default: ^issue-agent).
+#                          POSIX ERE (grep -E); invalid or non-matching patterns
+#                          fail open (email still sends)
 #
 # Enable by setting in tmux.conf:
 #   set -g @agent-indicator-notification-command 'bash ~/.tmux/plugins/tmux-agent-indicator/scripts/notify-email.sh'
@@ -104,6 +108,23 @@ send_email() {
         return 0
     fi
 }
+
+# Daemon/headless DND (ag-6b081f): sessions whose title matches the exclude
+# regex never send done/needs-input email — persistent daemon routers (e.g.
+# "issue-agent router ...") complete turns constantly and would spam the
+# mailbox. Replace the pattern via the option to extend it; an invalid regex
+# (grep errors) leaves emails sending as before. Empty falls back to the
+# default — disable with a pattern that matches nothing, e.g. '$^'.
+# Trade-off: the early exit also skips the needs-input EMAIL_AUTH
+# invalidation, so an excluded needs-input cannot cancel a pending done
+# email; reachable only when a session's title turns matching inside the
+# done delay window (rename mid-flight) — cost is one stale email, accepted.
+exclude_regex=$(tmux_get_option "@agent-indicator-email-exclude-title-regex")
+exclude_regex="${exclude_regex:-^issue-agent}"
+if [ -n "$oc_session" ] && [ -n "$exclude_regex" ] \
+    && printf '%s' "$oc_session" | grep -Eq -- "$exclude_regex"; then
+    exit 0
+fi
 
 case "${AGENT_STATE:-}" in
     needs-input)

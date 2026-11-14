@@ -30,6 +30,7 @@ options=(
     @agent-indicator-email-needs-input-enabled
     @agent-indicator-email-needs-input-throttle
     @agent-indicator-email-body-limit
+    @agent-indicator-email-exclude-title-regex
     @agent-indicator-session-dots-active
     @agent-indicator-session-dots-inactive
     @agent-indicator-session-dots-attention
