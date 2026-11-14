@@ -107,6 +107,7 @@ send_email() {
             echo "Date: $(date -R)"
             echo "MIME-Version: 1.0"
             echo "Content-Type: text/plain; charset=UTF-8"
+            echo "Content-Transfer-Encoding: 8bit"
             echo ""
             echo "$body"
         } | sendmail "$email_to"

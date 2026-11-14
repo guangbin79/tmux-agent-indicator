@@ -218,7 +218,8 @@ tmux_cmd set -gu '@agent-indicator-email-exclude-title-regex'
 # Test 22 (ag-1380c5): sendmail fallback emits the full MIME header block —
 # run notify-email.sh with a PATH that offers only a fake sendmail (no mail
 # binary reachable), capture what sendmail receives, and assert all four
-# headers survive so clients never guess latin1 (mojibake root cause).
+# spec headers (plus Content-Transfer-Encoding for the raw 8-bit body) so
+# clients never guess latin1 (mojibake root cause).
 sendmail_capture() {
     local state="$1"
     local message="$2"
@@ -249,7 +250,13 @@ sendmail_capture() {
          AGENT_SESSION='ai' \
          \"$ROOT_DIR/scripts/notify-email.sh\""
 
-    sleep 0.3
+    # Poll for the capture: run-shell jobs are async; deleting fake_bin on a
+    # fixed timer can race the job spawn and 127 the script mid-flight.
+    local waited=0
+    until [ -s "$capture_file" ] || [ "$waited" -ge 50 ]; do
+        sleep 0.1
+        waited=$((waited + 1))
+    done
     rm -rf "$fake_bin"
     cat "$capture_file" 2>/dev/null || true
 }
@@ -275,6 +282,9 @@ if ! grep -q '^MIME-Version: 1.0$' <<< "$body"; then
 fi
 if ! grep -q '^Content-Type: text/plain; charset=UTF-8$' <<< "$body"; then
     fail "sendmail fallback should carry Content-Type: text/plain; charset=UTF-8"
+fi
+if ! grep -q '^Content-Transfer-Encoding: 8bit$' <<< "$body"; then
+    fail "sendmail fallback should declare Content-Transfer-Encoding: 8bit for the raw UTF-8 body"
 fi
 if ! grep -q '^sendmail fallback body$' <<< "$body"; then
     fail "sendmail fallback body should arrive verbatim after the header block"
