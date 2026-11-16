@@ -13,6 +13,7 @@ tests=(
     "$ROOT_DIR/tests/test-window-title-reset.sh"
     "$ROOT_DIR/tests/test-running-animation.sh"
     "$ROOT_DIR/tests/test-notification-env-forwarding.sh"
+    "$ROOT_DIR/tests/test-notification-command-dollar.sh"
     "$ROOT_DIR/tests/test-fallback-pane-resolution.sh"
 )
 

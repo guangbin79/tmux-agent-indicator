@@ -26,8 +26,40 @@ set -euo pipefail
 agent="${AGENT_NAME:-opencode}"
 oc_session="${OPENCODE_SESSION_TITLE:-}"
 
+# tmux >=3.4 display-escapes show-option output ($ -> \$, backslash directly
+# before $ -> \\), which breaks $VAR expansion once the value reaches bash -c.
+# Older versions return values raw, so the unescape is version-gated; the
+# next-X.Y and X.Ya forms normalize to their numeric core, and a non-numeric
+# dev build counts as new.
+tmux_display_escapes=0
+_tver="$(tmux -V 2>/dev/null || true)"
+_tver="${_tver#tmux }"
+_tver="${_tver#next-}"
+_tmajor="${_tver%%.*}"
+_tminor="${_tver#*.}"
+if [ "$_tminor" = "$_tver" ]; then _tminor=0; fi
+_tminor="${_tminor%%[!0-9]*}"
+if [ "$_tmajor" -eq "$_tmajor" ] 2>/dev/null; then
+    if [ "$_tmajor" -gt 3 ] || { [ "$_tmajor" -eq 3 ] && [ "$_tminor" -ge 4 ]; }; then
+        tmux_display_escapes=1
+    fi
+else
+    tmux_display_escapes=1
+fi
+
+# shortcut: on tmux 3.4+ a literal \ not preceding $ is indistinguishable from
+# the display escaping and collapses to \; exact inverse mapping needs a
+# redesigned decoder — trade-off accepted to revive $VAR expansion.
+unescape_tmux_display() {
+    if [ "$tmux_display_escapes" = "1" ]; then
+        sed 's/\\\([$\\]\)/\1/g'
+    else
+        cat
+    fi
+}
+
 tmux_get_option() {
-    tmux show-option -gqv "$1" 2>/dev/null || true
+    tmux show-option -gqv "$1" 2>/dev/null | unescape_tmux_display || true
 }
 
 tmux_get_env() {
